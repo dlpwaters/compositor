@@ -1,0 +1,8 @@
+include LICENSE
+include linux/README.md
+recursive-include Compositor/Rendering *.c *.h
+recursive-include linux/tests *.py
+recursive-include packaging *.desktop PKGBUILD
+include scripts/linux-build.sh scripts/linux-install.sh scripts/linux-desktop.py scripts/arch-package.sh
+include scripts/linux-compare.py
+include docs/linux-parity.md docs/project-format.md docs/STATUS.md

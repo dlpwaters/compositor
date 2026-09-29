@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Compositor
+Comment=Layered image editing and compositing
+Exec=compositor %F
+Icon=compositor
+Terminal=false
+Categories=Graphics;2DGraphics;RasterGraphics;
+MimeType=image/png;image/jpeg;image/tiff;image/heic;image/heif;
+StartupWMClass=compositor
+Keywords=Image;Photo;Layers;Editor;

@@ -56,6 +56,12 @@ Because it’s open source, you can download the Xcode project and add, remove, 
 
 ## Requirements
 
+The Linux implementation lives alongside the original Mac app. On Arch Linux
+or Omarchy, follow [Linux setup and usage](linux/README.md). Its native Qt/Wayland
+editor reads `.comp` versions 1–7 and reuses the original C pixel kernels.
+See the [parity audit](docs/linux-parity.md) for verified behavior and remaining
+differences; exact macOS rendering equivalence is not yet certified.
+
 - macOS 26
 - Xcode 26 (to build from source)
 

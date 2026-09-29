@@ -1,14 +1,14 @@
-# Compositor project format, versions 1–6
+# Compositor project format, versions 1–7
 
-A `.comp` file is a macOS document package containing `manifest.json` and an `images/` directory of `<layer UUID>.png` assets.
+A `.comp` file is a document package containing `manifest.json` and an `images/` directory of `<layer UUID>.png` assets. On Linux the package is an ordinary directory ending in `.comp`; transfer the whole directory between machines.
 
-The manifest identifies `com.compositor.project`, version `6` for new saves (versions `1`–`5` remain readable), and the sRGB working space. It stores document UUID, pixel dimensions, active layer UUID, and layers in bottom-to-top order. Each layer stores its UUID, name, visibility, transform (origin, size, clockwise rotation, flips, sampling), and optional image filename. Blank layers have no image asset.
+The manifest identifies `com.compositor.project`, version `7` for new saves (versions `1`–`6` remain readable), and the sRGB working space. It stores document UUID, pixel dimensions, active layer UUID, and layers in bottom-to-top order. Each layer stores its UUID, name, visibility, transform (origin, size, clockwise rotation, flips, sampling), and optional image filename. Blank layers have no image asset. CGPoint origins and CGSize dimensions encode as `[x, y]` arrays; UUID asset names use uppercase canonical UUIDs.
 
 Embedded PNGs preserve source pixels and transparency; transforms remain separate. Projects survive moving or deleting imported source photos. Saving uses a coordinated atomic package replacement. Unsupported versions, invalid metadata, missing assets, unsafe paths, and oversized data are rejected before replacing the live document.
 
 Limits: 30,000 pixels per canvas/image side, 100 million total source pixels, 10,000 layers, 4 MiB manifest, 512 MiB per encoded asset. See `ProjectStore.swift` for validation.
 
-Undo history and viewport are session-only. Opening fits the canvas, restores selection, and starts with clean history. Future editable features must extend the schema and round-trip tests. PNG export is a flattened derivative and does not mark project edits saved.
+Undo history, selection, and viewport are session-only. Opening fits the canvas, restores the active layer, and starts with clean history. Future editable features must extend the schema and round-trip tests. PNG export is a flattened derivative and does not mark project edits saved.
 
 Image Size adds optional `resolution` (pixels/inch, 1–9600). Older manifests without it default to 72. This additive field retains version 1 compatibility. Both PNG and JPEG exports include document resolution metadata. Resampling stores the new layer pixels and bounds; undo retains the prior sources only during the current session.
 
@@ -25,3 +25,27 @@ Version 5 adds optional `maskSourceID`: the UUID of a non-group layer supplying 
 UI terminology: these alpha links are clipping masks. Option-click assigns the lower sibling’s base or releases the connection. Multiple clipped layers share one base, show indented above it, and release when moved outside the contiguous stack. The underlying `maskSourceID` representation is unchanged.
 
 Version 6 allows `maskFile` and `maskEnabled` on group records. A folder has no image, so its mask covers the folder's own transform rectangle (the canvas size when the folder was created); Image Size resamples it through that transform, and Canvas Size and Crop preserve its pixels, exactly as for layer masks. Groups are pass-through, so an enabled folder mask multiplies the coverage of every descendant layer, together with that layer's own mask and any enclosing folders' masks; clipping-mask coverage is unaffected. Files declaring versions 1–5 cannot give a group a mask, and older app builds reject v6.
+
+Version 7 adds adjustment-layer metadata and editable shape metadata. `adjustment.kind`
+is Hue/Saturation, Levels, Curves, Exposure, Gradient Map, or Grain. The Swift Codable
+record requires legacy `hue`, `saturation`, `lightness`, `colorize`, `levels` and `curves`
+fields even when inactive. Levels stores four ranges (RGB, Red, Green, Blue); Curves
+stores four point arrays in the same order. Newer settings are optional nested
+`hsvSettings`, `exposureSettings`, `gradientMapSettings`, and `grainSettings` records.
+HSV dictionaries keyed by the Swift ColorRange enum encode as alternating key/value
+arrays, for example `["Reds", {"hue": 15, "saturation": 0, "lightness": 0}]`.
+`shape` stores Rectangle or Ellipse, normalized RGB values, and `cornerRadius`.
+Groups cannot carry adjustment or shape content.
+
+Optional `maskPlacement` uses the same transform record as a layer; `maskLinked`
+defaults to true. A placed linked mask follows subsequent layer transforms; an
+unlinked mask keeps its document placement. Uniform 1×1 masks supply constant
+coverage. Displaced masks use their edge coverage to choose the outside background.
+These optional placement fields are accepted on earlier mask-capable format versions.
+
+Linux saves stage a complete sibling directory, fsync the assets and manifest, and
+atomically exchange it with an existing valid project using Linux `renameat2`.
+Filesystems without exchange support return an error and preserve the existing project.
+Unknown optional manifest and layer fields are retained. This compatibility contract
+is tested against source-derived fixtures; a real Mac-to-Linux-to-Mac corpus remains
+necessary to certify end-to-end interchange and rendering parity.
