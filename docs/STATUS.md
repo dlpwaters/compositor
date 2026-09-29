@@ -38,9 +38,11 @@ Verified locally on Arch/Omarchy x86_64 with Python 3.14:
 - One synthetic four-layer 1600×1000 render took 0.282 seconds and peaked at
   320.5 MiB process RSS. This is a basic CPU/memory sanity check, not a photo benchmark.
 
-GitHub CI is configured for Python 3.12 and 3.14. Remote qualification is tracked
-in the Linux workflow on the feature branch. No default-branch merge or release
-has been performed.
+Implementation commit: `3e5a488`. A clean archive of the committed tracked files
+also builds a wheel. GitHub CI is configured for Python 3.12 and 3.14 but has not
+run remotely. Automatic approval review rejected the feature-branch push because
+the fork is public and explicit publication approval is required. The branch is
+local; nothing has been pushed, merged, or released.
 
 This is not a certified full 1:1 replacement. [The parity audit](linux-parity.md)
 lists implementation and verification separately. Mac-generated reference files
@@ -52,5 +54,6 @@ Large-photo performance, additional inter-app drop behavior, aarch64, and clean
 system package installation still need qualification.
 
 Next: collect the Mac reference corpus and complete the remaining interactions.
+Publish the feature branch and draft PR once public-fork publication is approved.
 For exact output comparisons, use `scripts/linux-compare.py` on original Mac
 `.comp` projects and PNG exports.
