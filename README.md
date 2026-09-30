@@ -17,6 +17,9 @@ and interaction parity are still being qualified. Rendering uses the CPU, and
 local background removal uses U2NETP rather than Apple Vision. See the
 [feature and parity audit](docs/linux-parity.md) for specific limits.
 
+[Download the 0.1.0 preview](https://github.com/dlpwaters/compositor/releases/tag/linux-v0.1.0)
+for source, a Python 3.14 x86_64 wheel, an experimental Arch package, and checksums.
+
 ![Compositor Linux editing a sample poster with text and color layers](docs/screenshots/editor.png)
 
 ## Install on Arch / Omarchy

@@ -2,6 +2,9 @@
 
 Linux build: **0.1.0**, early release. Implementation is tracked in
 [PR #1](https://github.com/dlpwaters/compositor/pull/1).
+[PR #1 is merged](https://github.com/dlpwaters/compositor/pull/1), and the
+[public preview release](https://github.com/dlpwaters/compositor/releases/tag/linux-v0.1.0)
+includes source, wheel, an experimental Arch package and SHA-256 checksums.
 Baseline: Compositor 1.0.4 (`a19db9011282399785dc18efcfded904627bdcc2`).
 The original Swift sources and eight C kernels remain unchanged.
 
@@ -24,11 +27,13 @@ Verified on Arch/Omarchy x86_64 with Python 3.14:
   Text tool events, preview/commit, text editing/undo, cancellation, export, and
   save/reopen with identical rendered pixels. Published screenshots show only
   the synthetic sample project in the application's Fusion theme.
-- Earlier native checks cover brush strokes, gradient/transform/crop Apply/Cancel,
+- The installed release launcher passes all 14 broad native Wayland smoke checks:
+  brush strokes, gradient/transform/crop Apply/Cancel,
   Hue/Saturation targeting, original-pixel Levels sampling, distortion, and
   clipboard Copy Merged/Paste with an independent `wl-paste` reader. The later
-  broad smoke rerun stopped at its window-focus prerequisite. The current text
-  checks do not establish physical keyboard delivery or replace that broad run.
+  broad smoke rerun after the icon update stopped at its window-focus prerequisite;
+  the final release run passes that prerequisite and all checks. These tests use
+  Qt event delivery and do not establish physical keyboard delivery.
 - Wheel and source builds succeed. An independently installed wheel outside the
   checkout renders all 28 SVGs and edits/renders saved text layers. The original
   MIT notice is present in the wheel and distributions.
@@ -47,6 +52,9 @@ Verified on Arch/Omarchy x86_64 with Python 3.14:
 [Linux CI](https://github.com/dlpwaters/compositor/actions/workflows/linux.yml)
 runs Python 3.12/3.14 tests, lint/format, Desktop Entry validation and isolated
 wheel/source builds. Consult the workflow for the result at a specific commit.
+The [merged-main run](https://github.com/dlpwaters/compositor/actions/runs/36745781801)
+passes both jobs at `a95b24d`. A fresh public clone at that commit also builds
+the kernels and passes all 129 tests. Uploaded release digests match local artifacts.
 
 This is **not a certified full 1:1 replacement**. The
 [parity audit](linux-parity.md) separates implemented behavior from qualification.
