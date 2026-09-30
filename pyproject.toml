@@ -27,7 +27,7 @@ package-dir = {"" = "linux"}
 packages = ["compositor_linux", "compositor_linux.assets"]
 
 [tool.setuptools.package-data]
-compositor_linux = ["assets/*.png"]
+compositor_linux = ["assets/*.png", "assets/icons/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["linux/tests"]

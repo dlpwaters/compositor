@@ -64,7 +64,10 @@ only x86_64 has been exercised so far.
 ## Editing and shortcuts
 
 Create a canvas or import an image, choose a tool on the left, and select layers
-or their mask thumbnails on the right. Most operations commit one undo step;
+or their mask thumbnails on the right. Tools and common actions use bundled
+monochrome SVG icons that scale with display density; hover for tool names and
+shortcuts. The Brush icon switches to an eraser in Erase mode.
+Most operations commit one undo step;
 filter previews disappear when cancelled. Transforming an image preserves its
 source raster until a pixel edit is applied. Ctrl+T opens a pending transform;
 use Apply/Enter or Cancel/Escape. Crop and gradients also keep editable previews.

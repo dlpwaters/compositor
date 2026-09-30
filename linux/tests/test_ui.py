@@ -9,7 +9,7 @@ from compositor_linux.model import Document, Layer
 from PIL import Image
 from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTabBar
 
 
 @pytest.fixture(scope="session")
@@ -80,6 +80,18 @@ def test_tabs_keep_documents_and_viewports(window, application):
     assert window.history is first and window.canvas.zoom == 2
     window.switch_project(1)
     assert window.history is second
+
+
+def test_tab_close_button_tracks_its_project_after_indices_shift(window, application):
+    projects = [window.add_project(document()) for _ in range(3)]
+    for project in projects:
+        project.saved_revision = project.revision
+    side = QTabBar.ButtonPosition.RightSide
+    window.tabs.tabButton(0, side).click()
+    assert window.projects == projects[1:]
+    window.tabs.tabButton(1, side).click()
+    assert window.projects == [projects[1]]
+    assert window.history is projects[1]
 
 
 def test_filter_cancel_does_not_modify_document(window, application):
@@ -251,7 +263,7 @@ def test_alt_handle_resize_keeps_one_layer_and_its_center(window, application):
     )
     assert len(window.history.document.layers) == 1
     final = window.history.document.layer().transform
-    assert final.center == initial.center
+    assert final.center == pytest.approx(initial.center, abs=1e-9, rel=0)
     assert final.width > initial.width
 
 

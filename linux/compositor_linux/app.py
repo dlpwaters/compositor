@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageChops, ImageFilter, ImageOps
-from PySide6.QtCore import QByteArray, QMimeData, QSettings, Qt, QTimer
+from PySide6.QtCore import QByteArray, QMimeData, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
 from . import __version__, editing, engine, kernels, models, store
 from .canvas import Canvas, qimage
 from .dialogs import FilterDialog, JPEGDialog, SizeDialog, TransformDialog, ValuesDialog, number
+from .icons import icon
 from .model import ADJUSTMENTS, BLENDS, Document, History, Layer, new_id
 from .tasks import run_task
 
@@ -57,7 +58,12 @@ QMenuBar,QToolBar,QTabBar { background:#313339; }
 QToolBar { border:0;spacing:5px;padding:5px; }
 QPushButton,QToolButton { background:#3b3e45;border:1px solid #4b4e56;border-radius:5px;padding:5px 9px; }
 QPushButton:hover,QToolButton:hover { background:#4b505b; }
-QToolButton:checked { background:#3c607f;border-color:#73b4ec; }
+QToolButton[iconButton="true"] { background:transparent;border:1px solid transparent;border-radius:2px;padding:0; }
+QToolButton[iconButton="true"]:hover { background:#45484f;border-color:#55585f; }
+QToolButton[iconButton="true"]:checked { background:#4a4d54;border-color:#73767d; }
+QToolButton[iconButton="true"]:pressed { background:#555860; }
+QToolButton[iconButton="true"]:focus { border-color:#8b9daf; }
+QWidget#toolRail { background:#2b2d32; }
 QComboBox,QSpinBox,QDoubleSpinBox,QLineEdit { background:#23252a;border:1px solid #4d515a;border-radius:4px;padding:4px; }
 QTreeWidget { background:#25272c;border:0;outline:0; }
 QTreeWidget::item { padding:4px; }
@@ -71,6 +77,18 @@ QTabBar::tab:selected { background:#424750; }
 QSplitter::handle { background:#191b1f;width:4px; }
 QStatusBar { background:#303238; }
 """
+
+
+def icon_button(name, label, parent=None):
+    button = QToolButton(parent)
+    button.setProperty("iconButton", True)
+    button.setIcon(icon(name))
+    button.setIconSize(QSize(20, 20))
+    button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+    button.setFixedSize(34, 32)
+    button.setToolTip(label)
+    button.setAccessibleName(label)
+    return button
 
 
 class LayerTree(QTreeWidget):
@@ -139,6 +157,21 @@ class ProjectTabs(QTabBar):
         self.setMovable(False)
         self.currentChanged.connect(owner.switch_project)
         self.tabCloseRequested.connect(owner.close_project)
+
+    def tabInserted(self, index):
+        super().tabInserted(index)
+        button = icon_button("close", "Close project", self)
+        button.setFixedSize(20, 20)
+        button.setIconSize(QSize(16, 16))
+        button.clicked.connect(lambda: self.close_tab(button))
+        self.setTabButton(index, QTabBar.ButtonPosition.RightSide, button)
+
+    def close_tab(self, button):
+        # Indices shift when another tab closes; resolve the button's current tab.
+        for index in range(self.count()):
+            if self.tabButton(index, QTabBar.ButtonPosition.RightSide) is button:
+                self.tabCloseRequested.emit(index)
+                break
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat("application/x-compositor-layer"):
@@ -236,7 +269,9 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
         self.toolbar = toolbar
-        new = QPushButton("＋ New")
+        new = QPushButton("New")
+        new.setIcon(icon("new-document"))
+        new.setIconSize(QSize(18, 18))
         new.setObjectName("newCanvasToolbar")
         new.clicked.connect(lambda: self.run(self.new_canvas))
         toolbar.addWidget(new)
@@ -247,13 +282,16 @@ class MainWindow(QMainWindow):
             spacer.sizePolicy().Policy.Expanding, spacer.sizePolicy().Policy.Preferred
         )
         toolbar.addWidget(spacer)
-        for label, callback in (
-            ("Fit", lambda: self.canvas.fit()),
-            ("100%", lambda: self.canvas.zoom_to(1)),
-            ("＋", lambda: self.canvas.zoom_to(self.canvas.zoom * 1.25)),
-            ("−", lambda: self.canvas.zoom_to(self.canvas.zoom / 1.25)),
+        for name, label, callback in (
+            ("fit", "Fit canvas", lambda: self.canvas.fit()),
+            (None, "100%", lambda: self.canvas.zoom_to(1)),
+            ("zoom-in", "Zoom in", lambda: self.canvas.zoom_to(self.canvas.zoom * 1.25)),
+            ("zoom-out", "Zoom out", lambda: self.canvas.zoom_to(self.canvas.zoom / 1.25)),
         ):
-            button = QPushButton(label)
+            button = icon_button(name, label) if name else QPushButton(label)
+            button.setObjectName("view_" + (name or "actual-size"))
+            button.setAccessibleName(label)
+            button.setToolTip("Actual size" if name is None else label)
             button.clicked.connect(callback)
             toolbar.addWidget(button)
         central = QWidget()
@@ -272,35 +310,32 @@ class MainWindow(QMainWindow):
         layout.addWidget(option_scroll)
         self.splitter = QSplitter()
         tools = QWidget()
+        tools.setObjectName("toolRail")
         rail = QVBoxLayout(tools)
         rail.setContentsMargins(6, 8, 6, 8)
-        rail.setSpacing(4)
+        rail.setSpacing(2)
         self.tool_buttons = {}
         definitions = [
-            ("move", "↖", "Move / Transform (V)"),
-            ("marquee", "▧", "Marquee (M)"),
-            ("lasso", "♧", "Lasso (L)"),
-            ("wand", "✧", "Magic Wand (W)"),
-            ("crop", "⌗", "Crop (C)"),
-            ("brush", "B", "Brush (B) / Eraser (E)"),
-            ("heal", "J", "Spot Healing (J)"),
-            ("clone", "S", "Clone Stamp (S)"),
-            ("smear", "R", "Smear (R)"),
-            ("gradient", "◩", "Gradient (G)"),
-            ("shape", "◻", "Shape (U)"),
-            ("eyedropper", "I", "Eyedropper (I)"),
-            ("hand", "H", "Hand (H)"),
-            ("zoom", "Z", "Zoom (Z)"),
+            ("move", "Move / Transform (V)"),
+            ("marquee", "Marquee (M)"),
+            ("lasso", "Lasso (L)"),
+            ("wand", "Magic Wand (W)"),
+            ("crop", "Crop (C)"),
+            ("brush", "Brush (B) / Eraser (E)"),
+            ("heal", "Spot Healing (J)"),
+            ("clone", "Clone Stamp (S)"),
+            ("smear", "Smear (R)"),
+            ("gradient", "Gradient (G)"),
+            ("shape", "Shape (U)"),
+            ("eyedropper", "Eyedropper (I)"),
+            ("hand", "Hand (H)"),
+            ("zoom", "Zoom (Z)"),
         ]
-        for name, symbol, label in definitions:
-            button = QToolButton()
-            button.setText(symbol)
-            button.setToolTip(label)
-            button.setAccessibleName(label)
+        for name, label in definitions:
+            button = icon_button(name, label)
             button.setObjectName("tool_" + name)
             button.setCheckable(True)
             button.setAutoExclusive(True)
-            button.setFixedSize(34, 30)
             button.toggled.connect(
                 lambda checked, n=name: self.set_tool(n) if checked and self.tool != n else None
             )
@@ -337,13 +372,16 @@ class MainWindow(QMainWindow):
         self.tree = LayerTree(self)
         panel_layout.addWidget(self.tree, 1)
         bottom = QHBoxLayout()
-        for label, callback in (
-            ("＋", lambda: editing.new_layer(self.history)),
-            ("▣", lambda: editing.add_mask(self.history)),
-            ("Folder", lambda: editing.new_layer(self.history, group=True)),
-            ("−", self.delete),
+        bottom.setSpacing(4)
+        bottom.addStretch()
+        for name, label, callback in (
+            ("new-layer", "New layer", lambda: editing.new_layer(self.history)),
+            ("mask", "Add layer mask", lambda: editing.add_mask(self.history)),
+            ("folder", "New layer group", lambda: editing.new_layer(self.history, group=True)),
+            ("trash", "Delete selected layers", self.delete),
         ):
-            button = QPushButton(label)
+            button = icon_button(name, label)
+            button.setObjectName("layer_" + name)
             button.clicked.connect(lambda _, f=callback: self.run(f) if self.history else None)
             bottom.addWidget(button)
         panel_layout.addLayout(bottom)
@@ -636,6 +674,8 @@ class MainWindow(QMainWindow):
                     image = layer.image.copy()
                     image.thumbnail((44, 32))
                     item.setIcon(0, QIcon(QPixmap.fromImage(qimage(image))))
+                elif layer.group:
+                    item.setIcon(0, icon("folder"))
                 if layer.mask is not None:
                     mask_image = layer.mask.copy()
                     mask_image.thumbnail((32, 24))
@@ -784,6 +824,8 @@ class MainWindow(QMainWindow):
                 ("Apply Crop" if self.tool == "crop" else "Apply", self.canvas.apply_pending),
             ):
                 button = QPushButton(label)
+                button.setIcon(icon("cancel" if label == "Cancel" else "apply"))
+                button.setIconSize(QSize(18, 18))
                 button.clicked.connect(callback)
                 self.option_layout.addWidget(button)
         self.option_layout.addStretch()
@@ -791,6 +833,9 @@ class MainWindow(QMainWindow):
             self.option_layout.addWidget(QLabel("Editing mask"))
         for name, button in self.tool_buttons.items():
             button.setChecked(name == self.tool)
+        self.tool_buttons["brush"].setIcon(
+            icon("eraser" if self.options["brush_mode"] == "Erase" else "brush")
+        )
         for button, color in (
             (self.foreground_button, self.foreground),
             (self.background_button, self.background),
@@ -820,6 +865,8 @@ class MainWindow(QMainWindow):
 
     def set_option(self, key, value):
         self.options[key] = value
+        if key == "brush_mode":
+            self.tool_buttons["brush"].setIcon(icon("eraser" if value == "Erase" else "brush"))
         self.canvas.refresh_pending()
 
     def cancel_pending(self):

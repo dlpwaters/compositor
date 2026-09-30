@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import engine, hue, levels
+from .icons import icon
 from .model import Transform
 from .tasks import run_task
 
@@ -49,6 +50,8 @@ class ValuesDialog(QDialog):
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setIcon(icon("apply"))
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setIcon(icon("cancel"))
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         self.layout_box.addWidget(self.buttons)
@@ -537,6 +540,7 @@ class FilterDialog(ValuesDialog):
         self.preview_check = self.add_check("Preview", True)
         if kind in ("Levels", "Hue/Saturation"):
             reset = QPushButton("Reset")
+            reset.setIcon(icon("reset"))
             reset.clicked.connect(self.reset_controls)
             self.form.addRow(reset)
         for widget in self.fields.values():

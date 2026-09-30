@@ -9,11 +9,16 @@ model installation and Arch packaging are in [linux/README.md](../linux/README.m
 
 Verified locally on Arch/Omarchy x86_64 with Python 3.14:
 
-- 105 unit and native Qt event tests pass, covering project validation/round trips,
+- 106 unit and native Qt event tests pass, covering project validation/round trips,
   masks/clipping, blend alpha, adjustments, geometry, painting, warp, undo/redo,
   cancellation, finite workers, JPEG preview encoding, empty selections, original
   Levels sampling/Auto, hue-band editing, persistent transforms, crop and gradient.
-- A real Wayland smoke exercise paints through Qt mouse events, invokes menu
+- The tool rail and common action buttons use 27 original monochrome SVG icons.
+  All render at normal and high DPI sizes and are present in both wheel and source
+  archive. Wayland screenshots and AT-SPI Brush selection verify the palette;
+  Qt key events verify the Erase glyph, and layer/mask/folder buttons work. The
+  tab-close regression verifies the correct project closes after tab indices change.
+- The pre-icon-update Wayland smoke exercise paints through Qt mouse events, invokes menu
   undo/redo and project save, reopens the package, compares rendering, exports
   PNG/JPEG, captures the editor and exits. Copy Merged/Paste matched the composite
   pixel-for-pixel through the actual Wayland clipboard, including an independent
@@ -25,6 +30,11 @@ Verified locally on Arch/Omarchy x86_64 with Python 3.14:
 - The per-user desktop entry validates and the installed launcher opens a native
   `compositor` Hyprland window. Host AT-SPI observation and semantic tool selection
   verify the Brush option panel; the native screenshot was inspected.
+- The full Wayland smoke rerun after the icon update stopped at its window-focus
+  prerequisite. Current native screenshots and AT-SPI tool selection passed;
+  mode switching and layer action checks passed through Qt's event path. The
+  Wayland dropdown driver did not commit an Erase selection, so its row-selection
+  acknowledgement was not treated as verification.
 - Actual local U2NETP inference returns a nonuniform full-size mask. The default
   model's size and SHA-256 were verified. Model weights are outside the repository.
 - Ruff, shell syntax and Desktop Entry validation pass. A local Arch package
@@ -38,10 +48,11 @@ Verified locally on Arch/Omarchy x86_64 with Python 3.14:
 - One synthetic four-layer 1600×1000 render took 0.282 seconds and peaked at
   320.5 MiB process RSS. This is a basic CPU/memory sanity check, not a photo benchmark.
 
-Implementation commit: `3e5a488`. A clean archive of the committed tracked files
-also builds a wheel. GitHub CI is configured for Python 3.12 and 3.14 but has not
-run remotely. Automatic approval review rejected the feature-branch push because
-the fork is public and explicit publication approval is required. The branch is
+Initial implementation commit: `3e5a488`. A clean archive of the committed tracked
+files also builds a wheel. The icon update builds with the installed development
+dependencies using `--no-isolation`. GitHub CI is configured for Python 3.12 and
+3.14 but has not run remotely. Public-fork publication is approved; the requested
+icon styling update is complete before opening the draft PR. The branch is still
 local; nothing has been pushed, merged, or released.
 
 This is not a certified full 1:1 replacement. [The parity audit](linux-parity.md)
@@ -54,6 +65,6 @@ Large-photo performance, additional inter-app drop behavior, aarch64, and clean
 system package installation still need qualification.
 
 Next: collect the Mac reference corpus and complete the remaining interactions.
-Publish the feature branch and draft PR once public-fork publication is approved.
+Publish the validated feature branch and draft PR, then verify remote CI.
 For exact output comparisons, use `scripts/linux-compare.py` on original Mac
 `.comp` projects and PNG exports.
