@@ -18,8 +18,8 @@ Verified locally on Arch/Omarchy x86_64 with Python 3.14:
   archive. Wayland screenshots and AT-SPI Brush selection verify the palette;
   Qt key events verify the Erase glyph, and layer/mask/folder buttons work. The
   tab-close regression verifies the correct project closes after tab indices change.
-- The pre-icon-update Wayland smoke exercise paints through Qt mouse events, invokes menu
-  undo/redo and project save, reopens the package, compares rendering, exports
+- The pre-icon-update Wayland smoke exercise paints through Qt mouse events,
+  invokes menu undo/redo and project save, reopens the package, compares rendering, exports
   PNG/JPEG, captures the editor and exits. Copy Merged/Paste matched the composite
   pixel-for-pixel through the actual Wayland clipboard, including an independent
   `wl-paste` reader; prior contents were restored.
@@ -38,7 +38,8 @@ Verified locally on Arch/Omarchy x86_64 with Python 3.14:
 - Actual local U2NETP inference returns a nonuniform full-size mask. The default
   model's size and SHA-256 were verified. Model weights are outside the repository.
 - Ruff, shell syntax and Desktop Entry validation pass. A local Arch package
-  builds, runs its checks and contains the expected `/usr` paths and interpreter.
+  rebuild includes all 27 SVGs, passes all 106 tests and contains the expected
+  `/usr` paths and interpreter.
   Build dependencies were supplied by the development environment with makepkg
   dependency resolution skipped; system package installation was not performed.
 - A built wheel installed into a separate dependency environment outside the
@@ -49,11 +50,14 @@ Verified locally on Arch/Omarchy x86_64 with Python 3.14:
   320.5 MiB process RSS. This is a basic CPU/memory sanity check, not a photo benchmark.
 
 Initial implementation commit: `3e5a488`. A clean archive of the committed tracked
-files also builds a wheel. The icon update builds with the installed development
-dependencies using `--no-isolation`. GitHub CI is configured for Python 3.12 and
-3.14 but has not run remotely. Public-fork publication is approved; the requested
-icon styling update is complete before opening the draft PR. The branch is still
-local; nothing has been pushed, merged, or released.
+files also builds a wheel. The icon update is `a9dad31`; its wheel also renders
+every SVG from a separate installed environment. The branch is pushed to the
+public fork, with [draft PR #1](https://github.com/dlpwaters/compositor/pull/1).
+GitHub's [push workflow](https://github.com/dlpwaters/compositor/actions/runs/36717461320)
+and [PR workflow](https://github.com/dlpwaters/compositor/actions/runs/36717586703)
+both pass on Python 3.12 and 3.14 at `a9dad31`: 106 tests, lint/format checks,
+Desktop Entry validation and wheel/source builds. Subsequent documentation-only
+updates do not change the tested runtime. Nothing has been merged or released.
 
 This is not a certified full 1:1 replacement. [The parity audit](linux-parity.md)
 lists implementation and verification separately. Mac-generated reference files
@@ -65,6 +69,6 @@ Large-photo performance, additional inter-app drop behavior, aarch64, and clean
 system package installation still need qualification.
 
 Next: collect the Mac reference corpus and complete the remaining interactions.
-Publish the validated feature branch and draft PR, then verify remote CI.
+The PR remains a draft until the remaining parity qualification is complete.
 For exact output comparisons, use `scripts/linux-compare.py` on original Mac
 `.comp` projects and PNG exports.
