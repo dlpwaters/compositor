@@ -5,7 +5,8 @@ Linux build: **0.1.1**, early release. The base port is merged in
 fresh-machine source installer, a detailed user guide, a native workspace 5
 screen recording, refreshed screenshots, and an editable synthetic poster.
 The [0.1.1 preview](https://github.com/dlpwaters/compositor/releases/tag/linux-v0.1.1)
-is the intended installation target for this guide.
+provides the installation target for this guide. The installer and media update
+is tracked in [PR #2](https://github.com/dlpwaters/compositor/pull/2).
 Baseline: Compositor 1.0.4 (`a19db9011282399785dc18efcfded904627bdcc2`).
 The original Swift sources and eight C kernels remain unchanged.
 
@@ -34,7 +35,7 @@ Verified on Arch/Omarchy x86_64 with Python 3.14:
   editing/undo, solid-layer recoloring/undo, project reopening and PNG export.
   The 37-second H.264 video and animated preview were recorded on workspace 5
   and visually reviewed; no personal content or audio is included.
-- The installed release launcher passes all 14 broad native Wayland smoke checks:
+- The 0.1.0 installed release launcher passed all 14 broad native Wayland smoke checks:
   brush strokes, gradient/transform/crop Apply/Cancel,
   Hue/Saturation targeting, original-pixel Levels sampling, distortion, and
   clipboard Copy Merged/Paste with an independent `wl-paste` reader. The later
@@ -46,8 +47,8 @@ Verified on Arch/Omarchy x86_64 with Python 3.14:
   MIT notice is present in the wheel and distributions.
 - The 0.1.1 Arch package creation with development dependencies passes 137 tests and
   includes both commands, all 28 SVGs, the text renderer, license, notices and
-  screenshots, footage and the editable sample. Its entrypoint uses `/usr/bin/python`; Qt SVG and Wayland are
-  explicit dependencies. Source archives exclude prior Arch build directories.
+  screenshots, footage and the editable sample. Its entrypoint uses `/usr/bin/python`;
+  Qt SVG and Wayland are explicit dependencies. Source archives exclude prior Arch build directories.
   Build dependency resolution was skipped with
   `makepkg --nodeps`; system installation was not performed.
 - The 0.1.1 per-user installer passes a fresh **official Arch x86_64 container**
@@ -69,10 +70,12 @@ Verified on Arch/Omarchy x86_64 with Python 3.14:
 runs Python 3.12/3.14 tests, lint/format, Desktop Entry validation and isolated
 wheel/source builds. A new pinned Arch container job exercises the per-user
 installer and explicitly verifies root-install refusal. Consult the workflow
-for the result at a specific commit.
-The [merged-main run](https://github.com/dlpwaters/compositor/actions/runs/36745781801)
-passes both jobs at `a95b24d`. A fresh public clone at that commit also builds
-the kernels and passes all 129 tests. Uploaded release digests match local artifacts.
+for the result at a specific commit. The
+[0.1.1 milestone run](https://github.com/dlpwaters/compositor/actions/runs/36756904123)
+passes all three jobs at `f92391c`. The earlier
+[0.1.0 merged-main run](https://github.com/dlpwaters/compositor/actions/runs/36745781801)
+passes both Python jobs at `a95b24d`; a fresh public clone at that commit also
+built the kernels and passed its 129 tests.
 
 This is **not a certified full 1:1 replacement**. The
 [parity audit](linux-parity.md) separates implemented behavior from qualification.
