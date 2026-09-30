@@ -4,12 +4,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from compositor_linux.app import MainWindow
-from compositor_linux.dialogs import FilterDialog
+from compositor_linux.dialogs import FilterDialog, NewLayerDialog, TextLayerDialog
 from compositor_linux.model import Document, Layer
 from PIL import Image
-from PySide6.QtCore import QPoint, QSettings, Qt
+from PySide6.QtCore import QPoint, QSettings, Qt, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QTabBar
+from PySide6.QtWidgets import QApplication, QColorDialog, QTabBar
 
 
 @pytest.fixture(scope="session")
@@ -70,6 +70,209 @@ def test_accessible_tool_toggle_selects_tool(window, application):
     application.processEvents()
     assert window.tool == "brush"
     assert not window.tool_buttons["move"].isChecked()
+
+
+@pytest.mark.parametrize("solid", [False, True])
+def test_new_layer_dialog_contents_and_active_selection(window, application, solid):
+    from compositor_linux import engine
+
+    window.add_project(document())
+
+    def configure():
+        dialog = QApplication.activeModalWidget()
+        assert isinstance(dialog, NewLayerDialog)
+        dialog.name.setText("Backdrop")
+        dialog.fill.setCurrentText("Solid color" if solid else "Transparent")
+        dialog.color.set_color((20, 50, 80))
+        dialog.accept()
+
+    QTimer.singleShot(10, configure)
+    window.actions["New Layer…"].trigger()
+    layer = window.history.document.layer()
+    assert layer.name == "Backdrop" and window.selected == {layer.id}
+    if solid:
+        assert engine.render(window.history.document).getpixel((64, 64)) == (20, 50, 80, 255)
+        assert layer.shape["kind"] == "Rectangle"
+    else:
+        assert layer.image is None and layer.shape is None
+    assert len(window.history.undo_stack) == 1
+
+
+def test_cancelled_layer_and_text_dialogs_leave_no_edit(window, application):
+    window.add_project(document())
+    revision = window.history.revision
+    QTimer.singleShot(10, lambda: QApplication.activeModalWidget().reject())
+    window.actions["New Layer…"].trigger()
+    QTimer.singleShot(10, lambda: QApplication.activeModalWidget().reject())
+    window.actions["New Text Layer…"].trigger()
+    application.processEvents()
+    assert window.history.revision == revision and len(window.history.document.layers) == 1
+    assert not window.history.undo_stack and window.preview_document is None
+    assert window.content_dialog is None
+
+
+def test_closing_owner_cancels_text_preview_and_keeps_project(window, application):
+    window.add_project(document())
+
+    def close_owner():
+        dialog = QApplication.activeModalWidget()
+        dialog.editor.setPlainText("Unsaved preview")
+        dialog.render_preview()
+        assert window.preview_document is not None
+        window.close()
+
+    QTimer.singleShot(10, close_owner)
+    window.actions["New Text Layer…"].trigger()
+    assert window.isVisible() and len(window.projects) == 1
+    assert window.preview_document is None and window.content_dialog is None
+    assert not window.history.undo_stack
+
+
+def test_text_rendering_is_plain_and_rejects_oversized_raster(application):
+    from compositor_linux.text import render_text
+    from test_core import text_settings
+
+    settings = text_settings()
+    settings["text"] = '<img src="https://example.com/private.png">'
+    assert render_text(settings).getchannel("A").getbbox() is not None
+    settings.update(text="W" * 1000, size=2048)
+    with pytest.raises(ValueError):
+        render_text(settings)
+
+
+def test_double_click_solid_layer_recolors_as_one_undo_step(window, application):
+    from compositor_linux import engine
+
+    window.add_project(document())
+    window.create_layer("Solid", (20, 50, 80))
+    window.refresh()
+
+    def recolor():
+        dialog = QApplication.activeModalWidget()
+        assert isinstance(dialog, QColorDialog)
+        from PySide6.QtGui import QColor
+
+        dialog.setCurrentColor(QColor(200, 80, 40))
+        dialog.accept()
+
+    item = window.tree.topLevelItem(0)
+    point = window.tree.visualRect(window.tree.indexFromItem(item, 0)).center()
+    QTest.mouseClick(window.tree.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    QTimer.singleShot(10, recolor)
+    QTest.mouseDClick(window.tree.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert engine.render(window.history.document).getpixel((64, 64)) == (200, 80, 40, 255)
+    assert len(window.history.undo_stack) == 2
+    window.history.undo()
+    assert engine.render(window.history.document).getpixel((64, 64)) == (20, 50, 80, 255)
+
+
+def test_edit_content_availability_follows_tree_selection(window, application):
+    window.add_project(document())
+    window.create_layer("Solid", (20, 50, 80))
+    window.refresh()
+    action = window.actions["Edit Layer Content…"]
+    assert action.isEnabled()
+    window.tree.setCurrentItem(window.tree.topLevelItem(1))
+    assert not action.isEnabled()
+    window.tree.setCurrentItem(window.tree.topLevelItem(0))
+    assert action.isEnabled()
+
+
+def test_text_tool_canvas_creation_edit_roundtrip_and_raster_fallback(
+    window, application, tmp_path
+):
+    from compositor_linux import engine, store
+
+    window.add_project(document())
+    QTest.keyClick(window.canvas, Qt.Key.Key_T)
+    assert window.tool == "text"
+    previews = []
+
+    def configure():
+        dialog = QApplication.activeModalWidget()
+        assert isinstance(dialog, TextLayerDialog)
+        dialog.editor.setPlainText("Hello Ω\nWorld")
+        dialog.fields["Size (px)"].setValue(18)
+        dialog.fields["Bold"].setChecked(True)
+        dialog.fields["Alignment"].setCurrentText("Center")
+        dialog.color.set_color((60, 160, 240))
+        dialog.render_preview()
+        previews.append(window.preview_document is not None and not window.history.undo_stack)
+        dialog.accept()
+
+    QTimer.singleShot(10, configure)
+    QTest.mouseClick(
+        window.canvas, Qt.MouseButton.LeftButton, pos=window.canvas.screen((16, 16)).toPoint()
+    )
+    layer = window.history.document.layer()
+    assert previews == [True]
+    assert layer.live_text.settings["text"] == "Hello Ω\nWorld"
+    assert layer.live_text.settings["color"] == [60, 160, 240]
+    assert layer.image.getchannel("A").getbbox() is not None
+    assert len(window.history.undo_stack) == 1
+    assert window.preview_document is None and window.content_dialog is None
+    path = tmp_path / "text.comp"
+    store.save(window.history.document, path)
+    loaded = store.load(path)
+    assert loaded.layer().live_text.settings == layer.live_text.settings
+    expected = engine.render(loaded).tobytes()
+    import json
+
+    manifest_path = path / "manifest.json"
+    metadata = json.loads(manifest_path.read_text())
+    del next(r for r in metadata["layers"] if r["id"] == layer.id)["linuxText"]
+    manifest_path.write_text(json.dumps(metadata))
+    fallback = store.load(path)
+    assert fallback.layer().live_text is None and engine.render(fallback).tobytes() == expected
+
+    def edit():
+        dialog = QApplication.activeModalWidget()
+        dialog.editor.setPlainText("Changed")
+        dialog.accept()
+
+    QTimer.singleShot(10, edit)
+    window.actions["Edit Layer Content…"].trigger()
+    assert window.history.document.layer().id == layer.id
+    assert window.history.document.layer().live_text.settings["text"] == "Changed"
+    window.history.undo()
+    assert window.history.document.layer().live_text.settings["text"] == "Hello Ω\nWorld"
+    window.history.redo()
+    assert window.history.document.layer().live_text.settings["text"] == "Changed"
+
+
+def test_text_edit_preserves_rotated_flipped_anchor_and_scale(application):
+    from dataclasses import replace
+
+    from compositor_linux import editing
+    from compositor_linux.model import History
+    from compositor_linux.text import render_text
+    from test_core import text_settings
+
+    history = History(document())
+    settings = text_settings()
+    with history.edit("Text") as d:
+        layer = editing.put_text(d, settings, render_text(settings), (20, 30))
+        layer.transform = replace(
+            layer.transform,
+            width=layer.transform.width * 2,
+            height=layer.transform.height * 1.5,
+            rotation=37,
+            flip_x=True,
+        )
+    layer = history.document.layer()
+    old = layer.transform
+    anchor = old.point(1, 0)
+    scale = old.width / layer.image.width, old.height / layer.image.height
+    with history.edit("Edit Text") as d:
+        changed = dict(settings, text="Longer Ω text")
+        editing.put_text(d, changed, render_text(changed), layer_id=layer.id)
+    layer = history.document.layer()
+    assert layer.transform.point(1, 0) == pytest.approx(anchor, abs=1e-8)
+    assert (
+        layer.transform.width / layer.image.width,
+        layer.transform.height / layer.image.height,
+    ) == pytest.approx(scale)
+    assert layer.transform.rotation == 37 and layer.transform.flip_x
 
 
 def test_tabs_keep_documents_and_viewports(window, application):

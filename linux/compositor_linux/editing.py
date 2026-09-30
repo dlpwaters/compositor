@@ -1,6 +1,7 @@
 """Undoable editing commands independent of the desktop UI."""
 
 import math
+from copy import deepcopy
 from dataclasses import replace
 
 import numpy as np
@@ -8,7 +9,7 @@ from PIL import Image, ImageChops, ImageOps
 from scipy.ndimage import map_coordinates
 
 from . import engine, kernels
-from .model import Document, Layer, Transform, dimensions, new_id
+from .model import Document, Layer, TextContent, Transform, dimensions, new_id, validate_text
 
 HANDLES = ((0, 0), (0.5, 0), (1, 0), (1, 0.5), (1, 1), (0.5, 1), (0, 1), (0, 0.5))
 
@@ -100,12 +101,63 @@ def import_layers(history, images):
             )
 
 
-def new_layer(history, group=False):
-    with history.edit("New Folder" if group else "New Layer") as document:
-        layer = Layer.blank(document.width, document.height, "Folder" if group else "Layer")
+def new_layer(history, group=False, name=None, color=None):
+    if group and color is not None:
+        raise ValueError("Folders cannot have a solid fill.")
+    label = "New Folder" if group else "New Solid Color Layer" if color is not None else "New Layer"
+    with history.edit(label) as document:
+        layer = Layer.blank(
+            document.width, document.height, name or ("Folder" if group else "Layer")
+        )
         layer.group = group
+        if color is not None:
+            dimensions(document.width, document.height, raster=True)
+            layer.shape = solid_style(color)
+            layer.image = Image.new("RGBA", (document.width, document.height), (*color, 255))
         inserted(document, layer)
     return layer.id
+
+
+def solid_style(color):
+    if len(color) != 3 or any(type(value) is not int or not 0 <= value <= 255 for value in color):
+        raise ValueError("Choose an RGB layer color.")
+    return dict(
+        kind="Rectangle",
+        cornerRadius=0,
+        **dict(zip(("red", "green", "blue"), (v / 255 for v in color))),
+    )
+
+
+def put_text(document, settings, image, position=None, layer_id=None):
+    """Replace editable text while preserving placement, scale and linked masks."""
+    validate_text(settings)
+    dimensions(*image.size, raster=True)
+    if layer_id is None:
+        x, y = position or (document.width * 0.1, document.height * 0.1)
+        layer = Layer(
+            settings["text"].strip().splitlines()[0][:48],
+            Transform(x, y, image.width, image.height),
+        )
+        inserted(document, layer)
+    else:
+        layer = document.layer(layer_id)
+        if layer is None or layer.live_text is None:
+            raise ValueError("Select an editable text layer.")
+        old = layer.transform
+        updated = replace(
+            old,
+            width=image.width * old.width / layer.image.width,
+            height=image.height * old.height / layer.image.height,
+        )
+        anchor = (1 if old.flip_x else 0, 1 if old.flip_y else 0)
+        before, after = old.point(*anchor), updated.point(*anchor)
+        updated = replace(
+            updated, x=updated.x + before[0] - after[0], y=updated.y + before[1] - after[1]
+        )
+        set_transform(layer, updated)
+    layer.image = image
+    layer.text = TextContent(deepcopy(settings), image)
+    return layer
 
 
 def duplicate(history, selected):
@@ -428,7 +480,7 @@ def resize_image(history, width, height, resolution=None, resample=True):
             layer.transform = replace(
                 t, x=t.x * sx, y=t.y * sy, width=t.width * sx, height=t.height * sy
             )
-            if layer.image is not None:
+            if layer.image is not None and layer.live_text is None:
                 size = (
                     max(1, round(layer.image.width * sx)),
                     max(1, round(layer.image.height * sy)),

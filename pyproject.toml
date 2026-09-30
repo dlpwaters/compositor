@@ -5,10 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "compositor-linux"
 version = "0.1.0"
-description = "Native Linux port of the Compositor image editor"
+description = "Compositor Linux: native layered image editing for Arch and Omarchy"
 readme = "linux/README.md"
 requires-python = ">=3.11"
 license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
   "PySide6>=6.8,<7", "numpy>=2,<3", "Pillow>=11,<13",
   "scipy>=1.15,<2", "pillow-heif>=1,<2",
@@ -18,7 +19,13 @@ dependencies = [
 test = ["pytest>=8,<10", "ruff>=0.15,<1"]
 background = ["onnxruntime>=1.20,<2"]
 
+[project.urls]
+Repository = "https://github.com/dlpwaters/compositor"
+Issues = "https://github.com/dlpwaters/compositor/issues"
+Upstream = "https://github.com/robbietilton/Compositor"
+
 [project.scripts]
+compositor-linux = "compositor_linux.app:main"
 compositor = "compositor_linux.app:main"
 compositor-install-model = "compositor_linux.models:main"
 

@@ -46,6 +46,13 @@ tests can prove Linux behavior without proving byte-equivalent Mac output.
 
 ## Platform substitutions
 
+Editable text and the New Layer fill chooser are Linux additions, not features
+in the baseline Swift text schema. Text uses optional `linuxText` metadata and
+a baked PNG fallback; solid layers use the existing Rectangle shape schema.
+Text creation/editing, transformed placement, rasterization/undo, cancellation,
+and save/reopen have regression tests and native Wayland checks. Mac resaving
+can discard text editability; actual Mac round-trip testing remains pending.
+
 - SwiftUI/AppKit/SF Symbols become native Qt controls. Layout, dialogs, icons for
   tools, and focus behavior are therefore not pixel-identical to macOS.
 - Core Graphics and Core Image become a CPU renderer. Downsampling, antialiasing,

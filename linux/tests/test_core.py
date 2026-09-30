@@ -4,7 +4,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from compositor_linux import editing, engine, kernels, store
-from compositor_linux.model import BLENDS, Document, History, Layer, Transform
+from compositor_linux.model import BLENDS, Document, History, Layer, TextContent, Transform
 from PIL import Image
 
 
@@ -17,6 +17,87 @@ def project(width=16, height=16, color=(200, 80, 30, 255)):
 def test_identity_transform_and_render():
     d = project()
     assert engine.render(d).tobytes() == d.layers[0].image.tobytes()
+
+
+def text_settings():
+    return dict(
+        version=1,
+        text="Hello Ω",
+        family="DejaVu Sans",
+        size=24,
+        bold=False,
+        italic=False,
+        underline=False,
+        alignment="Left",
+        color=[20, 80, 160],
+    )
+
+
+def test_solid_color_layer_roundtrip_undo_and_group_parent(tmp_path):
+    history = History(project())
+    folder = editing.new_layer(history, group=True)
+    id = editing.new_layer(history, name="Backdrop", color=(12, 34, 56))
+    layer = history.document.layer()
+    assert layer.id == id and layer.parent == folder and layer.name == "Backdrop"
+    assert engine.render(history.document).getpixel((8, 8)) == (12, 34, 56, 255)
+    store.save(history.document, tmp_path / "color.comp")
+    loaded = store.load(tmp_path / "color.comp")
+    assert loaded.layer().shape == layer.shape
+    assert engine.render(loaded).tobytes() == engine.render(history.document).tobytes()
+    history.undo()
+    assert history.document.layer(id) is None
+    history.redo()
+    assert history.document.layer(id).shape == layer.shape
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("version", True),
+        ("text", " "),
+        ("text", "x" * 32769),
+        ("family", ""),
+        ("size", 0),
+        ("size", 2049),
+        ("size", True),
+        ("bold", 1),
+        ("alignment", "invalid"),
+        ("color", [256, 0, 0]),
+        ("color", [0, True, 0]),
+    ],
+)
+def test_text_metadata_validation(key, value):
+    document = project()
+    settings = dict(text_settings(), **{key: value})
+    document.layer().text = TextContent(settings, document.layer().image)
+    with pytest.raises(ValueError, match="text"):
+        document.validate()
+
+
+def test_pixel_edits_rasterize_text_and_undo_restores_editability():
+    history = History(project())
+    layer = history.document.layer()
+    layer.text = TextContent(text_settings(), layer.image)
+    with history.edit("Invert") as document:
+        editing.apply_filter(document, "Invert", {})
+    assert history.document.layer().text is None
+    history.undo()
+    assert history.document.layer().live_text.settings == text_settings()
+    history.redo()
+    assert history.document.layer().live_text is None
+
+
+def test_text_retains_source_on_image_resize_and_mask_changes():
+    history = History(project())
+    layer = history.document.layer()
+    layer.text = TextContent(text_settings(), layer.image)
+    image = layer.image
+    editing.add_mask(history)
+    editing.resize_image(history, 32, 48)
+    layer = history.document.layer()
+    assert layer.live_text is not None and layer.image is image
+    assert (layer.transform.width, layer.transform.height) == (32, 48)
+    assert layer.mask is not None
 
 
 @pytest.mark.parametrize("mode", BLENDS)

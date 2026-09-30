@@ -291,6 +291,8 @@ class Canvas(QWidget):
             return
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        if o.content_dialog is not None:
+            return
         if o.filter_dialog is not None:
             if o.filter_dialog.kind == "Levels":
                 o.filter_dialog.sample_levels(o.filter_dialog.original_sample(point))
@@ -307,6 +309,27 @@ class Canvas(QWidget):
                 self.zoom / (1.5 if modifiers & Qt.KeyboardModifier.AltModifier else 1 / 1.5),
                 event.position(),
             )
+            return
+        if o.tool == "text":
+            target = None
+            for layer, ancestors in self.document.entries(top_first=True):
+                if layer.group or layer.image is None:
+                    continue
+                u, v = layer.transform.local(*point, (1, 1))
+                if (
+                    layer.visible
+                    and all(parent.visible for parent in ancestors)
+                    and 0 <= u <= 1
+                    and 0 <= v <= 1
+                ):
+                    if layer.live_text is not None:
+                        target = layer.id
+                    break
+            position = (
+                max(0, min(point[0], self.document.width - 1)),
+                max(0, min(point[1], self.document.height - 1)),
+            )
+            o.run(lambda: o.text_layer_dialog(position, target))
             return
         if (
             o.tool == "eyedropper"
@@ -1121,6 +1144,7 @@ class Canvas(QWidget):
             r="smear",
             g="gradient",
             u="shape",
+            t="text",
             i="eyedropper",
             h="hand",
             z="zoom",
@@ -1175,7 +1199,11 @@ class Canvas(QWidget):
     def keyReleaseEvent(self, event):
         if event.key() == Qt.Key.Key_Space:
             self.space = False
-            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.setCursor(
+                Qt.CursorShape.IBeamCursor
+                if self.owner.tool == "text"
+                else Qt.CursorShape.ArrowCursor
+            )
 
     def leaveEvent(self, event):
         self.cursor_point = None

@@ -49,3 +49,28 @@ Filesystems without exchange support return an error and preserve the existing p
 Unknown optional manifest and layer fields are retained. This compatibility contract
 is tested against source-derived fixtures; a real Mac-to-Linux-to-Mac corpus remains
 necessary to certify end-to-end interchange and rendering parity.
+
+## Linux editable text extension
+
+Linux text layers have a normal `imageFile` containing their saved RGBA pixels,
+plus optional `linuxText` metadata. The project still declares version 7. Text
+cannot coexist with group, shape, or adjustment content. Readers without text
+support can display the ordinary raster fallback. Swift Codable ignores the
+unknown field; saving in the original Mac app can therefore discard editability.
+This compatibility inference still needs a real Mac round-trip test.
+
+`linuxText` version 1 has `text` (nonblank plain text, at most 32,768 characters),
+`family` (font family, at most 256 characters), `size` (integer 1–2048 pixels),
+`bold`, `italic`, `underline` (booleans), `alignment` (Left, Center, Right), and
+`color` (three integer RGB channels, 0–255). Native Qt font shaping runs only
+when adding or editing text. Opening and compositing use the saved PNG, so a
+missing font does not change the saved appearance. Subsequent text editing uses
+the installed family or Qt fallback. Text is plain; HTML and resource URLs are
+not interpreted. Rendered bounds must meet the normal raster limits.
+
+Move, scale, rotate, flip, masks, and appearance settings retain text editability.
+Image Size scales the placement while retaining the text source. Editing text
+preserves its source corner anchor and scale, including linked-mask movement.
+Pixel edits replace the immutable source and drop `linuxText`; Undo retains the
+previous editable snapshot. Solid-color layers use existing version-7 Rectangle
+shape metadata with an opaque full-canvas PNG, rather than a new format extension.

@@ -16,11 +16,12 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
-    launcher = Path.home() / ".local/bin/compositor"
+    launcher = Path.home() / ".local/bin/compositor-linux"
+    legacy_launcher = launcher.with_name("compositor")
     desktop = data / "applications/compositor.desktop"
     icon = data / "icons/hicolor/256x256/apps/compositor.png"
     if args.action == "remove":
-        for path in (launcher, desktop):
+        for path in (launcher, legacy_launcher, desktop):
             if path.exists() and MARKER in path.read_text():
                 path.unlink()
         if (
@@ -30,7 +31,7 @@ def main():
         ):
             icon.unlink()
     else:
-        for path in (launcher, desktop):
+        for path in (launcher, legacy_launcher, desktop):
             if path.is_symlink() or path.exists() and MARKER not in path.read_text():
                 raise SystemExit(f"Preserving existing file: {path}")
         if (
@@ -42,15 +43,17 @@ def main():
             )
         ):
             raise SystemExit(f"Preserving existing icon: {icon}")
-        for path in (launcher, desktop, icon):
+        for path in (launcher, legacy_launcher, desktop, icon):
             path.parent.mkdir(parents=True, exist_ok=True)
-        executable = root / "linux/.venv/bin/compositor"
+        executable = root / "linux/.venv/bin/compositor-linux"
         if not executable.is_file():
             raise SystemExit("Install the Python package into linux/.venv first.")
         launcher.write_text(
             f'#!/usr/bin/env bash\n{MARKER}\nexec {shlex.quote(str(executable))} "$@"\n'
         )
         launcher.chmod(0o755)
+        legacy_launcher.write_text(launcher.read_text())
+        legacy_launcher.chmod(0o755)
         # Desktop Entry quoting is different from shell quoting.
         escaped = (
             str(launcher)
@@ -63,13 +66,13 @@ def main():
         entry = (
             (root / "packaging/linux/compositor.desktop")
             .read_text()
-            .replace("Exec=compositor %F", f'Exec="{escaped}" %F')
+            .replace("Exec=compositor-linux %F", f'Exec="{escaped}" %F')
         )
         desktop.write_text(entry + MARKER + "\n")
         shutil.copyfile(root / "linux/compositor_linux/assets/compositor.png", icon)
     if shutil.which("update-desktop-database"):
         subprocess.run(["update-desktop-database", str(desktop.parent)], check=True)
-    print(f"Compositor desktop files: {args.action} complete")
+    print(f"Compositor Linux desktop files: {args.action} complete")
 
 
 if __name__ == "__main__":

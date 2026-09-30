@@ -1,4 +1,6 @@
 include LICENSE
+include README.md SECURITY.md THIRD_PARTY_NOTICES.md
+recursive-include docs/screenshots *.png
 include linux/README.md
 recursive-include Compositor/Rendering *.c *.h
 recursive-include linux/tests *.py

@@ -184,6 +184,34 @@ class Transform:
 
 
 @dataclass
+class TextContent:
+    settings: dict
+    image: Image.Image
+
+
+def validate_text(settings):
+    if (
+        not isinstance(settings, dict)
+        or type(settings.get("version")) is not int
+        or settings.get("version") != 1
+        or not isinstance(settings.get("text"), str)
+        or not settings["text"].strip()
+        or len(settings["text"]) > 32_768
+        or not isinstance(settings.get("family"), str)
+        or not settings["family"].strip()
+        or len(settings["family"]) > 256
+        or type(settings.get("size")) is not int
+        or not 1 <= settings["size"] <= 2048
+        or settings.get("alignment") not in ("Left", "Center", "Right")
+        or any(type(settings.get(key)) is not bool for key in ("bold", "italic", "underline"))
+        or not isinstance(settings.get("color"), list)
+        or len(settings["color"]) != 3
+        or any(type(value) is not int or not 0 <= value <= 255 for value in settings["color"])
+    ):
+        raise ValueError("Invalid editable text settings.")
+
+
+@dataclass
 class Layer:
     name: str
     transform: Transform
@@ -201,6 +229,7 @@ class Layer:
     mask_linked: bool = True
     adjustment: dict | None = None
     shape: dict | None = None
+    text: TextContent | None = None
     extras: dict = field(default_factory=dict)
 
     def clone(self):
@@ -210,7 +239,19 @@ class Layer:
             mask_transform=replace(self.mask_transform) if self.mask_transform else None,
             adjustment=deepcopy(self.adjustment),
             shape=deepcopy(self.shape),
+            text=TextContent(deepcopy(self.live_text.settings), self.image)
+            if self.live_text
+            else None,
             extras=deepcopy(self.extras),
+        )
+
+    @property
+    def live_text(self):
+        # A pixel edit replaces the immutable image and rasterizes the text.
+        return (
+            self.text
+            if isinstance(self.text, TextContent) and self.image is self.text.image
+            else None
         )
 
     @classmethod
@@ -308,6 +349,16 @@ class Document:
                     or layer.adjustment
                 ):
                     raise ValueError("Invalid live shape metadata.")
+            if layer.text is not None:
+                if (
+                    not isinstance(layer.text, TextContent)
+                    or layer.image is None
+                    or layer.group
+                    or layer.adjustment is not None
+                    or layer.shape is not None
+                ):
+                    raise ValueError("Invalid text layer metadata.")
+                validate_text(layer.text.settings)
             if layer.mask_transform:
                 layer.mask_transform.validate()
                 if layer.mask is None:
@@ -509,6 +560,9 @@ class History:
         revision = self.revision
         try:
             yield self.document
+            for layer in self.document.layers:
+                if isinstance(layer.text, TextContent) and layer.live_text is None:
+                    layer.text = None
             self.document.validate()
         except BaseException:
             self.document = before

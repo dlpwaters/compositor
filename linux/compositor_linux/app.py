@@ -47,7 +47,16 @@ from PySide6.QtWidgets import (
 
 from . import __version__, editing, engine, kernels, models, store
 from .canvas import Canvas, qimage
-from .dialogs import FilterDialog, JPEGDialog, SizeDialog, TransformDialog, ValuesDialog, number
+from .dialogs import (
+    FilterDialog,
+    JPEGDialog,
+    NewLayerDialog,
+    SizeDialog,
+    TextLayerDialog,
+    TransformDialog,
+    ValuesDialog,
+    number,
+)
 from .icons import icon
 from .model import ADJUSTMENTS, BLENDS, Document, History, Layer, new_id
 from .tasks import run_task
@@ -103,6 +112,7 @@ class LayerTree(QTreeWidget):
         self.setColumnWidth(1, 45)
         self.setColumnWidth(2, 35)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.EditKeyPressed)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setIconSize(QPixmap(44, 32).size())
@@ -196,7 +206,7 @@ class ProjectTabs(QTabBar):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Compositor")
+        self.setWindowTitle("Compositor Linux")
         self.setObjectName("compositorEditor")
         self.setMinimumSize(900, 560)
         self.resize(1280, 820)
@@ -204,6 +214,18 @@ class MainWindow(QMainWindow):
         self.current = -1
         self.preview_document = None
         self.filter_dialog = None
+        self.content_dialog = None
+        self.text_options = dict(
+            version=1,
+            text="",
+            family=QApplication.font().family(),
+            size=48,
+            bold=False,
+            italic=False,
+            underline=False,
+            alignment="Left",
+            color=[0, 0, 0],
+        )
         self.tool, self.mask_target = "move", False
         self.foreground, self.background = (0, 0, 0, 255), (255, 255, 255, 255)
         self.clone_source, self.clone_offset = None, None
@@ -250,7 +272,7 @@ class MainWindow(QMainWindow):
 
     def run(self, function, resolve=True):
         try:
-            if self.filter_dialog is not None:
+            if self.filter_dialog is not None or self.content_dialog is not None:
                 return False
             if resolve:
                 self.canvas.resolve_pending()
@@ -262,7 +284,7 @@ class MainWindow(QMainWindow):
             return False
 
     def fail(self, error):
-        QMessageBox.warning(self, "Compositor", str(error))
+        QMessageBox.warning(self, "Compositor Linux", str(error))
 
     def build_ui(self):
         toolbar = QToolBar("Project")
@@ -327,6 +349,7 @@ class MainWindow(QMainWindow):
             ("smear", "Smear (R)"),
             ("gradient", "Gradient (G)"),
             ("shape", "Shape (U)"),
+            ("text", "Text (T)"),
             ("eyedropper", "Eyedropper (I)"),
             ("hand", "Hand (H)"),
             ("zoom", "Zoom (Z)"),
@@ -375,7 +398,7 @@ class MainWindow(QMainWindow):
         bottom.setSpacing(4)
         bottom.addStretch()
         for name, label, callback in (
-            ("new-layer", "New layer", lambda: editing.new_layer(self.history)),
+            ("new-layer", "New layer…", self.new_layer_dialog),
             ("mask", "Add layer mask", lambda: editing.add_mask(self.history)),
             ("folder", "New layer group", lambda: editing.new_layer(self.history, group=True)),
             ("trash", "Delete selected layers", self.delete),
@@ -527,6 +550,10 @@ class MainWindow(QMainWindow):
         for kind in ADJUSTMENTS:
             self.action(adjustments, kind, lambda k=kind: self.new_adjustment(k))
         self.action(layer, "Edit Adjustment…", self.edit_adjustment)
+        self.action(layer, "New Layer…", self.new_layer_dialog, "Ctrl+Shift+N")
+        self.action(layer, "New Solid Color Layer…", lambda: self.new_layer_dialog(solid=True))
+        self.action(layer, "New Text Layer…", self.text_layer_dialog)
+        self.action(layer, "Edit Layer Content…", self.edit_layer_content)
         for label, func, key in (
             ("Transform…", self.transform_dialog, "Ctrl+T"),
             ("Duplicate / Layer via Copy", self.layer_via_copy, "Ctrl+J"),
@@ -543,8 +570,8 @@ class MainWindow(QMainWindow):
             ("Move Out of Folder", self.out_of_folder, None),
             (
                 "New Blank Layer",
-                lambda: editing.new_layer(self.history),
-                "Ctrl+Shift+N",
+                self.create_layer,
+                None,
             ),
             ("Rename Layer…", self.rename_layer, "F2"),
             ("Show / Hide Layer", self.toggle_visibility, None),
@@ -596,11 +623,11 @@ class MainWindow(QMainWindow):
         help_menu = self.menuBar().addMenu("Help")
         self.action(
             help_menu,
-            "About Compositor",
+            "About Compositor Linux",
             lambda: QMessageBox.information(
                 self,
-                "Compositor",
-                f"Compositor for Linux {__version__}\nNative Qt/Wayland port of Robbie Tilton's Compositor.\nMIT licensed application; Qt libraries retain their own licenses.\nFull parity validation is in progress.",
+                "Compositor Linux",
+                f"Compositor Linux {__version__}\nNative Qt/Wayland port of Robbie Tilton's Compositor.\nUpstream copyright: Wonder Assembly LLC.\nMIT licensed application; Qt libraries retain their own licenses.\nFull parity validation is in progress.",
             ),
             document=False,
         )
@@ -670,7 +697,10 @@ class MainWindow(QMainWindow):
                     0,
                     Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked,
                 )
-                if layer.image is not None:
+                if layer.live_text is not None:
+                    item.setIcon(0, icon("text"))
+                    item.setToolTip(0, "Text — double-click to edit")
+                elif layer.image is not None:
                     image = layer.image.copy()
                     image.thumbnail((44, 32))
                     item.setIcon(0, QIcon(QPixmap.fromImage(qimage(image))))
@@ -701,10 +731,18 @@ class MainWindow(QMainWindow):
         self.canvas.invalidate()
         self.update_status()
         self.setWindowTitle(
-            (h.path.stem if h and h.path else "Untitled") + " — Compositor" if h else "Compositor"
+            (h.path.stem if h and h.path else "Untitled") + " — Compositor Linux"
+            if h
+            else "Compositor Linux"
         )
 
     def refresh_options(self):
+        content_action = self.actions.get("Edit Layer Content…")
+        if content_action is not None:
+            layer = self.history.document.layer() if self.history else None
+            content_action.setEnabled(
+                layer is not None and (layer.live_text is not None or layer.shape is not None)
+            )
         while self.option_layout.count():
             item = self.option_layout.takeAt(0)
             if item.widget():
@@ -779,6 +817,21 @@ class MainWindow(QMainWindow):
         elif self.tool == "shape":
             choice("shape", ["Rectangle", "Ellipse"])
             spin("corner_radius", "Corner radius", 0, 2000)
+        elif self.tool == "text":
+            self.option_layout.addWidget(QLabel("Click the canvas to add or edit text"))
+            for label, callback in (
+                ("Add Text…", self.text_layer_dialog),
+                ("Edit Selected Text…", self.edit_layer_content),
+            ):
+                button = QPushButton(label)
+                button.setIcon(icon("text"))
+                layer = self.history.document.layer() if self.history else None
+                button.setEnabled(
+                    self.history is not None
+                    and (label == "Add Text…" or layer is not None and layer.live_text is not None)
+                )
+                button.clicked.connect(lambda _, f=callback: self.run(f))
+                self.option_layout.addWidget(button)
         elif self.tool == "move" and self.history and self.history.document.layer():
             check("auto_select", "Auto select")
             check("locks_transform_ratio", "Lock ratio")
@@ -860,6 +913,9 @@ class MainWindow(QMainWindow):
             self.options["crop_ratio"] = "Free"
             self.canvas.start_crop()
         self.refresh_options()
+        self.canvas.setCursor(
+            Qt.CursorShape.IBeamCursor if tool == "text" else Qt.CursorShape.ArrowCursor
+        )
         self.canvas.setFocus()
         self.canvas.update()
 
@@ -938,6 +994,83 @@ class MainWindow(QMainWindow):
                     active=layer.id,
                 )
             )
+
+    def create_layer(self, name=None, color=None):
+        id = editing.new_layer(self.history, name=name, color=color)
+        self.selected, self.mask_target = {id}, False
+        return id
+
+    def new_layer_dialog(self, solid=False):
+        dialog = NewLayerDialog(self.foreground, solid, self)
+        self.content_dialog = dialog
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            name = dialog.name.text().strip() or "Layer"
+            color = dialog.color.rgb() if dialog.fill.currentText() == "Solid color" else None
+        finally:
+            self.content_dialog = None
+            dialog.deleteLater()
+        if accepted:
+            self.create_layer(name, color)
+
+    def text_layer_dialog(self, position=None, layer_id=None):
+        document = self.history.document
+        layer = document.layer(layer_id) if layer_id else None
+        if layer_id and (layer is None or layer.live_text is None):
+            raise ValueError("Select an editable text layer.")
+        settings = dict(layer.live_text.settings) if layer else dict(self.text_options, text="")
+        if layer is None:
+            settings["color"] = list(self.foreground[:3])
+        dialog = TextLayerDialog(settings, self)
+
+        def preview(settings, pixels):
+            self.preview_document = None
+            if pixels is not None:
+                try:
+                    draft = document.clone()
+                    editing.put_text(draft, settings, pixels, position, layer_id)
+                    draft.validate()
+                    self.preview_document = draft
+                except ValueError as error:
+                    dialog.set_error(str(error))
+            self.canvas.invalidate()
+
+        dialog.preview_changed.connect(preview)
+        self.content_dialog = dialog
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            settings, pixels = dialog.settings(), dialog.pixels
+        finally:
+            dialog.timer.stop()
+            dialog.preview_changed.disconnect(preview)
+            self.content_dialog, self.preview_document = None, None
+            self.canvas.invalidate()
+            dialog.deleteLater()
+        if accepted:
+            with self.history.edit("Edit Text" if layer_id else "New Text Layer") as d:
+                result = editing.put_text(d, settings, pixels, position, layer_id)
+                self.selected, self.mask_target = {result.id}, False
+            self.text_options = dict(settings, text="")
+
+    def edit_layer_content(self):
+        layer = self.history.document.layer()
+        if layer is not None and layer.live_text is not None:
+            self.text_layer_dialog(layer_id=layer.id)
+        elif layer is not None and layer.shape is not None:
+            color = QColor(*(round(layer.shape[key] * 255) for key in ("red", "green", "blue")))
+            selected = QColorDialog.getColor(color, self, "Layer fill color")
+            if selected.isValid():
+                with self.history.edit("Layer Fill Color") as d:
+                    target = d.layer(layer.id)
+                    target.shape = dict(
+                        target.shape,
+                        red=selected.redF(),
+                        green=selected.greenF(),
+                        blue=selected.blueF(),
+                    )
+                    target.image = engine.shape_pixels(target.image.size, target.shape)
+        else:
+            raise ValueError("Select a text or shape layer to edit its content.")
 
     def open_project(self):
         path = QFileDialog.getExistingDirectory(
@@ -1035,6 +1168,10 @@ class MainWindow(QMainWindow):
         return True
 
     def closeEvent(self, event):
+        if self.content_dialog is not None:
+            self.content_dialog.reject()
+            event.ignore()
+            return
         if self.filter_dialog is not None:
             self.filter_dialog.reject()
             event.ignore()
@@ -1131,10 +1268,15 @@ class MainWindow(QMainWindow):
     def layer_double_clicked(self, item, column):
         if column == 0 and self.history.document.layer().adjustment:
             self.run(self.edit_adjustment)
+        elif column == 0:
+            layer = self.history.document.layer()
+            if layer.live_text is not None or layer.shape is not None:
+                self.run(self.edit_layer_content)
 
     def layer_context(self, point):
         menu = QMenu(self)
         for name in (
+            "Edit Layer Content…",
             "Duplicate / Layer via Copy",
             "Rename Layer…",
             "Group Selected Layers",
@@ -1658,13 +1800,13 @@ class MainWindow(QMainWindow):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Compositor image editor for Linux")
+    parser = argparse.ArgumentParser(description="Compositor Linux image editor")
     parser.add_argument("paths", nargs="*", help=".comp project directories or images")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--smoke-test", metavar="OUTPUT_DIRECTORY", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     application = QApplication(sys.argv[:1])
-    application.setApplicationName("Compositor")
+    application.setApplicationName("Compositor Linux")
     application.setDesktopFileName("compositor")
     application.setWindowIcon(QIcon(str(Path(__file__).parent / "assets/compositor.png")))
     application.setStyle("Fusion")

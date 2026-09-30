@@ -2,7 +2,7 @@
 pkgname=compositor-linux
 pkgver=0.1.0
 pkgrel=1
-pkgdesc='Native Qt/Wayland port of the Compositor layered image editor'
+pkgdesc='Compositor Linux: native layered image editing for Arch and Omarchy'
 arch=('x86_64' 'aarch64')
 url='https://github.com/dlpwaters/compositor'
 license=('MIT')
@@ -34,8 +34,14 @@ package() {
   install -Dm644 packaging/linux/compositor.desktop "$pkgdir/usr/share/applications/compositor.desktop"
   install -Dm644 linux/compositor_linux/assets/compositor.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/compositor.png"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  for document in SECURITY.md THIRD_PARTY_NOTICES.md; do
+    install -Dm644 "$document" "$pkgdir/usr/share/doc/$pkgname/$document"
+  done
   install -Dm644 linux/README.md "$pkgdir/usr/share/doc/$pkgname/linux/README.md"
   for document in docs/linux-parity.md docs/project-format.md docs/STATUS.md; do
     install -Dm644 "$document" "$pkgdir/usr/share/doc/$pkgname/$document"
+  done
+  for screenshot in docs/screenshots/*.png; do
+    install -Dm644 "$screenshot" "$pkgdir/usr/share/doc/$pkgname/$screenshot"
   done
 }

@@ -1,9 +1,9 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Compositor
+Name=Compositor Linux
 Comment=Layered image editing and compositing
-Exec=compositor %F
+Exec=compositor-linux %F
 Icon=compositor
 Terminal=false
 Categories=Graphics;2DGraphics;RasterGraphics;

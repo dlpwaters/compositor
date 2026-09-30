@@ -1,4 +1,4 @@
-# Compositor for Arch Linux and Omarchy
+# Compositor Linux: Arch and Omarchy guide
 
 Native Qt/Wayland image editing alongside the original macOS app, based on
 upstream `a19db901` (Compositor 1.0.4). The Linux editor provides layers, folders,
@@ -14,7 +14,7 @@ shortcuts. Rendering and filters currently use the CPU.
 ## Per-user installation on Omarchy
 
 Requires Python 3.11+, a C compiler, and `uv`. Arch's `base-devel`, `python`,
-`uv`, and `qt6-wayland` packages provide the system prerequisites. The installer
+`uv`, `qt6-svg`, and `qt6-wayland` packages provide the system prerequisites. The installer
 uses a project-local virtual environment and per-user launcher files; it needs
 no root privileges, services, or Hyprland configuration changes.
 
@@ -23,7 +23,7 @@ From the repository root:
 ```sh
 scripts/linux-install.sh
 linux/.venv/bin/compositor-install-model
-compositor
+compositor-linux
 ```
 
 The model command explicitly downloads a pinned, checksummed 4.6 MB U2NETP model.
@@ -33,7 +33,8 @@ The default model is under `$XDG_DATA_HOME/compositor/models/` (normally
 `~/.local/share/compositor/models/`). Its source and license are documented in
 the parity audit. An existing different model file is preserved.
 
-The application appears as **Compositor** in Omarchy's launcher. It also accepts
+The application appears as **Compositor Linux** in Omarchy's launcher. The
+`compositor` command remains an alias. It also accepts
 image paths or `.comp` directories on the command line. The installer preserves
 unrelated launchers and refuses to replace files it does not own. Moving the
 checkout requires rerunning the installer. Remove its launcher files with:
@@ -72,8 +73,18 @@ filter previews disappear when cancelled. Transforming an image preserves its
 source raster until a pixel edit is applied. Ctrl+T opens a pending transform;
 use Apply/Enter or Cancel/Escape. Crop and gradients also keep editable previews.
 Switching tools commits pending transforms/gradients and cancels a crop frame.
-Double-click an adjustment layer
-to edit it. Open `.comp` projects by selecting the whole package directory.
+Double-click an adjustment, text, or shape layer to edit its content.
+The layer + button or Ctrl+Shift+N opens a New Layer dialog with a name and
+Transparent / Solid color fill. A solid layer fills the canvas and remains
+recolorable through Edit Layer Content. Open `.comp` projects by selecting the
+whole package directory.
+
+Press T and click the canvas to add text; clicking an existing visible text
+layer opens its editor. Choose a font, pixel size, bold/italic/underline,
+alignment, and RGB color. Multiline plain text uses native Qt shaping with a
+live preview and one undo step on acceptance. Cancel leaves the document intact.
+Text retains its saved bitmap, placement, scaling, masks, and edit settings.
+Painting or applying a pixel filter rasterizes it; Undo restores editability.
 
 | Action | Linux shortcut |
 | --- | --- |
@@ -84,7 +95,8 @@ to edit it. Open `.comp` projects by selecting the whole package directory.
 | Export PNG / JPEG | Ctrl+Shift+E / Ctrl+Alt+Shift+S |
 | Move, marquee, lasso, wand, crop | V, M, L, W, C |
 | Brush, eraser, healing, clone, blur/liquify | B, E, J, S, R |
-| Gradient, shape, eyedropper, hand, zoom | G, U, I, H, Z |
+| Gradient, shape, text, eyedropper, hand, zoom | G, U, T, I, H, Z |
+| New layer with optional solid fill | Ctrl+Shift+N |
 | Transform / duplicate / merge / group | Ctrl+T / Ctrl+J / Ctrl+E / Ctrl+G |
 | Levels / Hue-Saturation / Curves / Invert | Ctrl+L / Ctrl+U / Ctrl+M / Ctrl+I |
 | Select all / deselect / inverse | Ctrl+A / Ctrl+D / Ctrl+Shift+I |
@@ -106,6 +118,12 @@ original photo paths. See [project format](../docs/project-format.md).
 Unknown optional manifest/layer fields are retained. PNG and JPEG exports use
 sRGB and document resolution; JPEG previews show the actual encoded bytes with
 a selectable transparency background.
+
+Editable text is a Linux extension with optional `linuxText` metadata and an
+ordinary PNG fallback. The original Mac app can display the baked pixels but
+can discard edit settings when saving. Reopening retains the saved appearance
+without the font; editing uses the installed font or Qt fallback. Real Mac
+round-trip qualification is still pending.
 
 Canvas/source sides are limited to 30,000 pixels. Source and mask asset budgets
 are each 100 megapixels. Flattened operations also require a raster within
@@ -130,7 +148,7 @@ Rebuild C changes using `scripts/linux-build.sh`; Python edits need no rebuild.
 A finite native GUI exercise is available for integration checks:
 
 ```sh
-QT_QPA_PLATFORM=wayland QT_QPA_PLATFORMTHEME= compositor --smoke-test /tmp/compositor-qa
+QT_QPA_PLATFORM=wayland QT_QPA_PLATFORMTHEME= compositor-linux --smoke-test /tmp/compositor-qa
 ```
 
 It paints through Qt mouse events, invokes undo/redo, saves and reopens a v7
@@ -142,6 +160,8 @@ It does not establish every feature's parity or replace human editing tests.
 
 ## License
 
-MIT for this port and upstream Compositor. Dependencies retain their licenses;
-PySide6 uses Qt's LGPL/GPL/commercial licensing. Model weights are downloaded
-separately and are excluded from repository archives and wheels.
+MIT for this port and upstream Compositor by Robbie Tilton / Wonder Assembly LLC.
+The original copyright and permission notice remain in [LICENSE](../LICENSE).
+Dependencies retain their licenses; PySide6 uses Qt's LGPL/GPL/commercial licensing.
+Model weights are downloaded separately and excluded from repository archives
+and wheels. See [third-party notices](../THIRD_PARTY_NOTICES.md).

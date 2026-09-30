@@ -15,7 +15,15 @@ from pathlib import Path
 
 from PIL import Image, ImageCms, ImageOps
 
-from .model import MAX_PIXELS, Document, Layer, Transform, adjustment_record, dimensions
+from .model import (
+    MAX_PIXELS,
+    Document,
+    Layer,
+    TextContent,
+    Transform,
+    adjustment_record,
+    dimensions,
+)
 
 FORMAT = "com.compositor.project"
 LAYER_KEYS = {
@@ -35,6 +43,7 @@ LAYER_KEYS = {
     "maskPlacement",
     "maskLinked",
     "shape",
+    "linuxText",
 }
 DOC_KEYS = {
     "format",
@@ -175,6 +184,8 @@ def load(path):
                         layer.mask = asset.copy()
                     else:
                         layer.image = asset.convert("RGBA")
+            if record.get("linuxText") is not None:
+                layer.text = TextContent(record["linuxText"], layer.image)
             document.layers.append(layer)
         document.validate()
         return document
@@ -223,6 +234,7 @@ def manifest(document):
                 adjustment_record(layer.adjustment) if layer.adjustment else None,
             ),
             ("shape", layer.shape),
+            ("linuxText", layer.live_text.settings if layer.live_text else None),
         ):
             if value is not None:
                 r[key] = value

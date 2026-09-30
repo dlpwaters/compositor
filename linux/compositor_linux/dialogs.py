@@ -6,7 +6,7 @@ from io import BytesIO
 
 import numpy as np
 from PIL import Image, ImageCms
-from PySide6.QtCore import QEventLoop, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEventLoop, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -15,8 +15,11 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFontComboBox,
     QFormLayout,
     QLabel,
+    QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -27,6 +30,7 @@ from . import engine, hue, levels
 from .icons import icon
 from .model import Transform
 from .tasks import run_task
+from .text import render_text
 
 
 def number(value, minimum, maximum, decimals=0):
@@ -86,6 +90,159 @@ class ValuesDialog(QDialog):
         if isinstance(widget, QCheckBox):
             return widget.isChecked()
         return widget.value()
+
+
+class ColorButton(QPushButton):
+    changed = Signal()
+
+    def __init__(self, color, label, parent=None):
+        super().__init__(parent)
+        self.color = QColor(*color[:3])
+        self.setAccessibleName(label)
+        self.clicked.connect(self.choose)
+        self.update_swatch()
+
+    def update_swatch(self):
+        swatch = QPixmap(18, 18)
+        swatch.fill(self.color)
+        from PySide6.QtGui import QIcon
+
+        self.setIcon(QIcon(swatch))
+        self.setText(self.color.name().upper())
+        self.setToolTip(self.color.name().upper())
+
+    def choose(self):
+        selected = QColorDialog.getColor(self.color, self, self.accessibleName())
+        if selected.isValid():
+            self.set_color((selected.red(), selected.green(), selected.blue()))
+
+    def set_color(self, color):
+        self.color = QColor(*color[:3])
+        self.update_swatch()
+        self.changed.emit()
+
+    def rgb(self):
+        return self.color.red(), self.color.green(), self.color.blue()
+
+
+class NewLayerDialog(ValuesDialog):
+    def __init__(self, color, solid=False, parent=None):
+        super().__init__("New Layer", parent)
+        self.name = QLineEdit("Solid Color" if solid else "Layer")
+        self.name.setMaxLength(256)
+        self.name.setAccessibleName("Layer name")
+        self.form.addRow("Name", self.name)
+        self.fill = self.add_choice(
+            "Fill", ["Transparent", "Solid color"], "Solid color" if solid else "Transparent"
+        )
+        self.fill.setAccessibleName("Layer fill")
+        self.color = ColorButton(color, "Layer fill color")
+        self.form.addRow("Color", self.color)
+        self.fill.currentTextChanged.connect(self.update_fill)
+        self.update_fill()
+        self.setMinimumWidth(350)
+
+    def update_fill(self):
+        self.color.setEnabled(self.fill.currentText() == "Solid color")
+
+
+class TextLayerDialog(ValuesDialog):
+    preview_changed = Signal(dict, object)
+
+    def __init__(self, settings, parent=None):
+        super().__init__("Text Layer", parent)
+        self.setMinimumWidth(460)
+        self.editor = QPlainTextEdit(settings.get("text", ""))
+        self.editor.setAccessibleName("Text content")
+        self.editor.setPlaceholderText("Type your text…")
+        self.editor.setMinimumHeight(110)
+        self.form.addRow(self.editor)
+        self.family = QFontComboBox()
+        self.family.setAccessibleName("Text font")
+        font = self.family.currentFont()
+        font.setFamily(settings["family"])
+        self.family.setCurrentFont(font)
+        self.form.addRow("Font", self.family)
+        self.add_number("Size (px)", settings["size"], 1, 2048)
+        self.add_check("Bold", settings["bold"])
+        self.add_check("Italic", settings["italic"])
+        self.add_check("Underline", settings["underline"])
+        self.add_choice("Alignment", ["Left", "Center", "Right"], settings["alignment"])
+        self.color = ColorButton(settings["color"], "Text color")
+        self.form.addRow("Color", self.color)
+        self.preview = QLabel()
+        self.preview.setMinimumHeight(90)
+        self.preview.setFixedHeight(122)
+        self.preview.setStyleSheet("background:#858585;border:1px solid #555;padding:8px;")
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.form.addRow("Preview", self.preview)
+        self.error = QLabel()
+        self.error.setWordWrap(True)
+        self.form.addRow(self.error)
+        self.pixels = None
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self.render_preview)
+        self.editor.textChanged.connect(self.timer.start)
+        self.family.currentFontChanged.connect(lambda _: self.timer.start())
+        self.color.changed.connect(self.timer.start)
+        for widget in self.fields.values():
+            if isinstance(widget, QSpinBox):
+                widget.valueChanged.connect(lambda _: self.timer.start())
+            elif isinstance(widget, QCheckBox):
+                widget.toggled.connect(lambda _: self.timer.start())
+            else:
+                widget.currentTextChanged.connect(lambda _: self.timer.start())
+        QTimer.singleShot(0, self.render_preview)
+        self.editor.setFocus()
+
+    def settings(self):
+        return dict(
+            version=1,
+            text=self.editor.toPlainText(),
+            family=self.family.currentFont().family(),
+            size=self.value("Size (px)"),
+            bold=self.value("Bold"),
+            italic=self.value("Italic"),
+            underline=self.value("Underline"),
+            alignment=self.value("Alignment"),
+            color=list(self.color.rgb()),
+        )
+
+    def set_error(self, message):
+        self.error.setText(message)
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(not message)
+
+    def render_preview(self):
+        settings = self.settings()
+        try:
+            self.pixels = render_text(settings)
+            from .canvas import qimage
+
+            preview = QPixmap.fromImage(qimage(self.pixels))
+            if preview.width() > 340 or preview.height() > 100:
+                preview = preview.scaled(
+                    QSize(340, 100),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            self.preview.setPixmap(preview)
+            self.set_error("")
+        except ValueError as error:
+            self.pixels = None
+            self.preview.clear()
+            self.set_error("Enter some text." if not settings["text"].strip() else str(error))
+        self.preview_changed.emit(settings, self.pixels)
+
+    def accept(self):
+        self.timer.stop()
+        self.render_preview()
+        if (
+            self.pixels is not None
+            and self.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
+        ):
+            super().accept()
 
 
 class SizeDialog(ValuesDialog):

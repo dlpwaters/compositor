@@ -7,4 +7,4 @@ if [[ ! -x "$project_root/linux/.venv/bin/python" ]]; then
 fi
 uv pip install --python "$project_root/linux/.venv/bin/python" -e "$project_root[background]"
 "$project_root/linux/.venv/bin/python" "$project_root/scripts/linux-desktop.py" install
-printf 'Run compositor or open Compositor from the application launcher.\n'
+printf 'Run compositor-linux or open Compositor Linux from the application launcher.\n'
