@@ -42,6 +42,8 @@ Verified locally on Arch/Omarchy x86_64 with Python 3.14:
   `/usr` paths and interpreter.
   Build dependencies were supplied by the development environment with makepkg
   dependency resolution skipped; system package installation was not performed.
+  The package explicitly depends on `qt6-svg` for the bundled icon renderer;
+  Arch lists that support as optional for PySide6.
 - A built wheel installed into a separate dependency environment outside the
   checkout loads its packaged module, native kernel library and icon, and reads
   and renders a saved project. Installation used the local wheel and cached
@@ -56,8 +58,9 @@ public fork, with [draft PR #1](https://github.com/dlpwaters/compositor/pull/1).
 GitHub's [push workflow](https://github.com/dlpwaters/compositor/actions/runs/36717461320)
 and [PR workflow](https://github.com/dlpwaters/compositor/actions/runs/36717586703)
 both pass on Python 3.12 and 3.14 at `a9dad31`: 106 tests, lint/format checks,
-Desktop Entry validation and wheel/source builds. Subsequent documentation-only
-updates do not change the tested runtime. Nothing has been merged or released.
+Desktop Entry validation and wheel/source builds. Subsequent documentation and
+package dependency updates do not change the tested runtime. Nothing has been
+merged or released.
 
 This is not a certified full 1:1 replacement. [The parity audit](linux-parity.md)
 lists implementation and verification separately. Mac-generated reference files

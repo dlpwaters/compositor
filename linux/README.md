@@ -56,7 +56,7 @@ scripts/arch-package.sh
 ```
 
 Runtime packages are `pyside6`, `python-numpy`, `python-pillow`, `python-scipy`,
-`python-pillow-heif`, and `qt6-wayland`. Background removal additionally uses
+`python-pillow-heif`, `qt6-svg`, and `qt6-wayland`. Background removal additionally uses
 `python-onnxruntime-cpu`. The PKGBUILD supports a local audited archive rather
 than downloading an unpublished release. It declares x86_64 and aarch64;
 only x86_64 has been exercised so far.
