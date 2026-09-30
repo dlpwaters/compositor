@@ -13,20 +13,24 @@ shortcuts. Rendering and filters currently use the CPU.
 
 ## Per-user installation on Omarchy
 
-Requires Python 3.11+, a C compiler, and `uv`. Arch's `base-devel`, `python`,
-`uv`, `qt6-svg`, and `qt6-wayland` packages provide the system prerequisites. The installer
-uses a project-local virtual environment and per-user launcher files; it needs
-no root privileges, services, or Hyprland configuration changes.
+The [main installation guide](../README.md#install-on-arch--omarchy) covers a
+fresh machine, prerequisites, options, locations, upgrades and troubleshooting.
+The installer uses a project-local virtual environment and per-user launcher
+files. Run as your normal desktop user; only the explicit dependency option asks
+for graphical administrator authorization. No services or Hyprland configuration
+changes are installed.
 
 From the repository root:
 
 ```sh
-scripts/linux-install.sh
-linux/.venv/bin/compositor-install-model
-compositor-linux
+./install.sh --check
+./install.sh --install-system-deps
+~/.local/bin/compositor-linux
 ```
 
-The model command explicitly downloads a pinned, checksummed 4.6 MB U2NETP model.
+Use `./install.sh --install-model`, or
+`linux/.venv/bin/compositor-install-model` after installation, to explicitly
+download a pinned, checksummed 4.6 MB U2NETP model.
 Images stay local. Without a model the editor still works; Remove Background
 asks for a local U2NET-compatible ONNX file. The installer includes ONNX Runtime.
 The default model is under `$XDG_DATA_HOME/compositor/models/` (normally
@@ -40,7 +44,7 @@ unrelated launchers and refuses to replace files it does not own. Moving the
 checkout requires rerunning the installer. Remove its launcher files with:
 
 ```sh
-linux/.venv/bin/python scripts/linux-desktop.py remove
+./install.sh --remove
 ```
 
 Removal keeps projects, preferences, the model, and the virtual environment.
@@ -137,8 +141,8 @@ Large images can exceed practical memory/latency limits before the file limits.
 ```sh
 uv venv linux/.venv
 uv pip install --python linux/.venv/bin/python -e '.[test,background]' build
-linux/.venv/bin/ruff check linux scripts/linux-desktop.py scripts/linux-compare.py setup.py
-linux/.venv/bin/ruff format --check linux scripts/linux-desktop.py scripts/linux-compare.py setup.py
+linux/.venv/bin/ruff check linux scripts/linux-*.py setup.py
+linux/.venv/bin/ruff format --check linux scripts/linux-*.py setup.py
 QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME= linux/.venv/bin/python -m pytest -q
 linux/.venv/bin/python -m build
 desktop-file-validate packaging/linux/compositor.desktop

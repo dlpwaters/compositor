@@ -22,18 +22,28 @@ def main():
     icon = data / "icons/hicolor/256x256/apps/compositor.png"
     if args.action == "remove":
         for path in (launcher, legacy_launcher, desktop):
-            if path.exists() and MARKER in path.read_text():
+            if not path.is_symlink() and path.is_file() and MARKER in path.read_text():
                 path.unlink()
         if (
-            icon.is_file()
+            not icon.is_symlink()
+            and icon.is_file()
             and icon.read_bytes()
             == (root / "linux/compositor_linux/assets/compositor.png").read_bytes()
         ):
             icon.unlink()
     else:
-        for path in (launcher, legacy_launcher, desktop):
-            if path.is_symlink() or path.exists() and MARKER not in path.read_text():
+        for path in (launcher, desktop):
+            if (
+                path.is_symlink()
+                or path.exists()
+                and (not path.is_file() or MARKER not in path.read_text())
+            ):
                 raise SystemExit(f"Preserving existing file: {path}")
+        legacy_available = not legacy_launcher.is_symlink() and (
+            not legacy_launcher.exists()
+            or legacy_launcher.is_file()
+            and MARKER in legacy_launcher.read_text()
+        )
         if (
             icon.is_symlink()
             or icon.exists()
@@ -52,8 +62,11 @@ def main():
             f'#!/usr/bin/env bash\n{MARKER}\nexec {shlex.quote(str(executable))} "$@"\n'
         )
         launcher.chmod(0o755)
-        legacy_launcher.write_text(launcher.read_text())
-        legacy_launcher.chmod(0o755)
+        if legacy_available:
+            legacy_launcher.write_text(launcher.read_text())
+            legacy_launcher.chmod(0o755)
+        else:
+            print(f"Preserving unrelated compatibility command: {legacy_launcher}")
         # Desktop Entry quoting is different from shell quoting.
         escaped = (
             str(launcher)

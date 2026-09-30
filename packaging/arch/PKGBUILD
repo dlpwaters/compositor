@@ -1,6 +1,6 @@
 # Build from the local source archive produced by scripts/arch-package.sh.
 pkgname=compositor-linux
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc='Compositor Linux: native layered image editing for Arch and Omarchy'
 arch=('x86_64' 'aarch64')
@@ -43,5 +43,11 @@ package() {
   done
   for screenshot in docs/screenshots/*.png; do
     install -Dm644 "$screenshot" "$pkgdir/usr/share/doc/$pkgname/$screenshot"
+  done
+  for media in docs/media/*; do
+    install -Dm644 "$media" "$pkgdir/usr/share/doc/$pkgname/$media"
+  done
+  for sample in docs/examples/Studio.comp/manifest.json docs/examples/Studio.comp/images/*.png; do
+    install -Dm644 "$sample" "$pkgdir/usr/share/doc/$pkgname/$sample"
   done
 }
