@@ -1,0 +1,47 @@
+# Build from the local source archive produced by scripts/arch-package.sh.
+pkgname=compositor-linux
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Compositor Linux: native layered image editing for Arch and Omarchy'
+arch=('x86_64' 'aarch64')
+url='https://github.com/dlpwaters/compositor'
+license=('MIT')
+depends=('python' 'pyside6' 'python-numpy' 'python-pillow' 'python-scipy'
+         'python-pillow-heif' 'qt6-svg' 'qt6-wayland')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+checkdepends=('python-pytest' 'desktop-file-utils')
+optdepends=('python-onnxruntime-cpu: local ONNX inference for background removal')
+source=("compositor_linux-$pkgver.tar.gz")
+# The archive is generated from the checkout being packaged, not a remote release.
+sha256sums=('SKIP')
+
+build() {
+  cd "compositor_linux-$pkgver"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "compositor_linux-$pkgver"
+  python setup.py build_ext --inplace
+  QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME= python -m pytest -q
+  desktop-file-validate packaging/linux/compositor.desktop
+}
+
+package() {
+  cd "compositor_linux-$pkgver"
+  /usr/bin/python -m installer --prefix=/usr --destdir="$pkgdir" dist/*.whl
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 packaging/linux/compositor.desktop "$pkgdir/usr/share/applications/compositor.desktop"
+  install -Dm644 linux/compositor_linux/assets/compositor.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/compositor.png"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  for document in SECURITY.md THIRD_PARTY_NOTICES.md; do
+    install -Dm644 "$document" "$pkgdir/usr/share/doc/$pkgname/$document"
+  done
+  install -Dm644 linux/README.md "$pkgdir/usr/share/doc/$pkgname/linux/README.md"
+  for document in docs/linux-parity.md docs/project-format.md docs/STATUS.md; do
+    install -Dm644 "$document" "$pkgdir/usr/share/doc/$pkgname/$document"
+  done
+  for screenshot in docs/screenshots/*.png; do
+    install -Dm644 "$screenshot" "$pkgdir/usr/share/doc/$pkgname/$screenshot"
+  done
+}

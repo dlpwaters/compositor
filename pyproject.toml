@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77", "wheel>=0.45"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "compositor-linux"
+version = "0.1.0"
+description = "Compositor Linux: native layered image editing for Arch and Omarchy"
+readme = "linux/README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+  "PySide6>=6.8,<7", "numpy>=2,<3", "Pillow>=11,<13",
+  "scipy>=1.15,<2", "pillow-heif>=1,<2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "ruff>=0.15,<1"]
+background = ["onnxruntime>=1.20,<2"]
+
+[project.urls]
+Repository = "https://github.com/dlpwaters/compositor"
+Issues = "https://github.com/dlpwaters/compositor/issues"
+Upstream = "https://github.com/robbietilton/Compositor"
+
+[project.scripts]
+compositor-linux = "compositor_linux.app:main"
+compositor = "compositor_linux.app:main"
+compositor-install-model = "compositor_linux.models:main"
+
+[tool.setuptools]
+package-dir = {"" = "linux"}
+packages = ["compositor_linux", "compositor_linux.assets"]
+
+[tool.setuptools.package-data]
+compositor_linux = ["assets/*.png", "assets/icons/*.svg"]
+
+[tool.pytest.ini_options]
+testpaths = ["linux/tests"]
+pythonpath = ["linux"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"linux/tests/test_ui.py" = ["E402"]
