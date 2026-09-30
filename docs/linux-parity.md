@@ -42,7 +42,7 @@ tests can prove Linux behavior without proving byte-equivalent Mac output.
 | PNG export / JPEG preview / Copy Merged | sRGB+DPI PNG; actual encoded JPEG preview with quality and matte; native clipboard | Export and matte/DPI tests; real Wayland Copy Merged/Paste compared pixel-for-pixel and prior clipboard restored |
 | `.comp` v1–7 | Strict validated read/write; preserves optional metadata and immutable embedded assets | Source-derived version fixtures, save/reopen and atomic replacement tests; real Mac round-trip corpus pending |
 | Undo/redo | Shared immutable assets, revision-based dirty state, bounded snapshots | Rollback/undo/redo tests and live menu exercise |
-| macOS system integration and updates | Linux desktop entry, per-user installer, Arch package recipe | Native Wayland launcher/window observed; package install on a clean system and AUR publication pending |
+| macOS system integration and updates | Linux desktop entry, per-user installer, Arch package recipe | Native Wayland launcher/window observed; fresh Arch user install/reinstall/removal and headless renderer verified in a container; clean system package install and AUR publication pending |
 
 ## Platform substitutions
 

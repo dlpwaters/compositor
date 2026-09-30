@@ -1,10 +1,16 @@
 include LICENSE
 include README.md SECURITY.md THIRD_PARTY_NOTICES.md
 recursive-include docs/screenshots *.png
+recursive-include docs/media *.mp4 *.gif
+recursive-include docs/examples *.json *.png
 include linux/README.md
 recursive-include Compositor/Rendering *.c *.h
 recursive-include linux/tests *.py
 recursive-include packaging *.desktop PKGBUILD
+prune packaging/arch/src
+prune packaging/arch/pkg
 include scripts/linux-build.sh scripts/linux-install.sh scripts/linux-desktop.py scripts/arch-package.sh
 include scripts/linux-compare.py
+include install.sh scripts/linux-check.py scripts/linux-demo.py
+include scripts/linux-install-smoke.sh
 include docs/linux-parity.md docs/project-format.md docs/STATUS.md

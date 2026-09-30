@@ -1,9 +1,9 @@
 name: Linux
 on:
   push:
-    paths: ['linux/**', 'Compositor/Rendering/**', 'pyproject.toml', 'setup.py', 'MANIFEST.in', 'packaging/**', 'scripts/linux-*', 'scripts/arch-*', '.github/workflows/linux.yml']
+    paths: ['linux/**', 'Compositor/Rendering/**', 'pyproject.toml', 'setup.py', 'MANIFEST.in', 'install.sh', 'packaging/**', 'scripts/linux-*', 'scripts/arch-*', '.github/workflows/linux.yml']
   pull_request:
-    paths: ['linux/**', 'Compositor/Rendering/**', 'pyproject.toml', 'setup.py', 'MANIFEST.in', 'packaging/**', 'scripts/linux-*', 'scripts/arch-*', '.github/workflows/linux.yml']
+    paths: ['linux/**', 'Compositor/Rendering/**', 'pyproject.toml', 'setup.py', 'MANIFEST.in', 'install.sh', 'packaging/**', 'scripts/linux-*', 'scripts/arch-*', '.github/workflows/linux.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,8 +23,27 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libopengl0 desktop-file-utils
       - run: python -m pip install -e '.[test]' build
-      - run: ruff check linux scripts/linux-desktop.py scripts/linux-compare.py setup.py
-      - run: ruff format --check linux scripts/linux-desktop.py scripts/linux-compare.py setup.py
+      - run: bash -n install.sh scripts/linux-*.sh scripts/arch-package.sh
+      - run: ruff check linux scripts/linux-*.py setup.py
+      - run: ruff format --check linux scripts/linux-*.py setup.py
       - run: python -m pytest -q
       - run: desktop-file-validate packaging/linux/compositor.desktop
       - run: python -m build
+  arch-install:
+    runs-on: ubuntu-latest
+    container: archlinux:base@sha256:b21322c663be387c0ed9cbc7bbbfe18e41633ad4e7b7c77cfad45f128be20040
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Resolve fresh Arch prerequisites
+        run: |
+          mapfile -t packages < <(bash install.sh --system-packages)
+          pacman -Syu --noconfirm --needed "${packages[@]}"
+      - name: Verify ordinary-user installation and removal
+        run: |
+          if ./install.sh; then echo 'Root installation must be refused'; exit 1; fi
+          useradd --create-home installcheck
+          chown -R installcheck:installcheck "$GITHUB_WORKSPACE"
+          runuser -u installcheck -- bash "$GITHUB_WORKSPACE/scripts/linux-install-smoke.sh"

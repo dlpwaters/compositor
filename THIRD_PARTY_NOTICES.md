@@ -6,7 +6,10 @@ This fork is based on [Robbie Tilton's Compositor](https://github.com/robbietilt
 baseline 1.0.4 (`a19db9011282399785dc18efcfded904627bdcc2`). Copyright (c) 2026
 Wonder Assembly LLC. The complete upstream MIT notice is retained in [LICENSE](LICENSE).
 The macOS sources, eight portable C pixel kernels, and application artwork come
-from that project. New Linux tool/action SVGs and screenshots were made for this fork.
+from that project. New Linux tool/action SVGs, screenshots, the demo footage and
+the synthetic editable sample were made for this fork and use its MIT license.
+The sample refers to the separately installed Liberation Sans font; font files
+are not redistributed in the sample or application packages.
 
 ## Installed dependencies
 

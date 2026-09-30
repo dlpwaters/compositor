@@ -1,0 +1,322 @@
+{
+  "activeLayerID": "C47B8E10-D140-4856-9A52-834D22824A6E",
+  "colorSpace": "sRGB",
+  "documentID": "49420118-EA9C-4246-A64E-26AD06935316",
+  "format": "com.compositor.project",
+  "height": 800,
+  "layers": [
+    {
+      "blendMode": "Normal",
+      "id": "2F38A3C1-D049-47AA-97A6-4DCEC927DDBD",
+      "imageFile": "2F38A3C1-D049-47AA-97A6-4DCEC927DDBD.png",
+      "isGroup": false,
+      "isVisible": true,
+      "name": "Warm paper",
+      "opacity": 1,
+      "shape": {
+        "blue": 0.8941176470588236,
+        "cornerRadius": 0,
+        "green": 0.9411764705882353,
+        "kind": "Rectangle",
+        "red": 0.9607843137254902
+      },
+      "transform": {
+        "flipX": false,
+        "flipY": false,
+        "origin": [
+          0,
+          0
+        ],
+        "rotation": 0,
+        "sampling": "High quality",
+        "size": [
+          1200,
+          800
+        ]
+      }
+    },
+    {
+      "blendMode": "Normal",
+      "id": "B87EF2C5-CA26-424F-ADAA-903216B7DBBC",
+      "imageFile": "B87EF2C5-CA26-424F-ADAA-903216B7DBBC.png",
+      "isGroup": false,
+      "isVisible": true,
+      "name": "Terracotta circle",
+      "opacity": 1,
+      "shape": {
+        "blue": 0.2549019607843137,
+        "cornerRadius": 0,
+        "green": 0.3568627450980392,
+        "kind": "Ellipse",
+        "red": 0.807843137254902
+      },
+      "transform": {
+        "flipX": false,
+        "flipY": false,
+        "origin": [
+          750,
+          130
+        ],
+        "rotation": 0,
+        "sampling": "High quality",
+        "size": [
+          350,
+          350
+        ]
+      }
+    },
+    {
+      "blendMode": "Normal",
+      "id": "7FC5B5CB-5A24-4F5E-AE67-3B21D6281B27",
+      "imageFile": "7FC5B5CB-5A24-4F5E-AE67-3B21D6281B27.png",
+      "isGroup": false,
+      "isVisible": true,
+      "name": "Midnight circle",
+      "opacity": 1,
+      "shape": {
+        "blue": 0.25098039215686274,
+        "cornerRadius": 0,
+        "green": 0.2,
+        "kind": "Ellipse",
+        "red": 0.10980392156862745
+      },
+      "transform": {
+        "flipX": false,
+        "flipY": false,
+        "origin": [
+          650,
+          460
+        ],
+        "rotation": 0,
+        "sampling": "High quality",
+        "size": [
+          270,
+          270
+        ]
+      }
+    },
+    {
+      "blendMode": "Normal",
+      "id": "165F3146-5004-44BA-9E01-F9E8546B5B47",
+      "imageFile": "165F3146-5004-44BA-9E01-F9E8546B5B47.png",
+      "isGroup": false,
+      "isVisible": true,
+      "name": "Fine rule",
+      "opacity": 1,
+      "shape": {
+        "blue": 0.25098039215686274,
+        "cornerRadius": 0,
+        "green": 0.2,
+        "kind": "Rectangle",
+        "red": 0.10980392156862745
+      },
+      "transform": {
+        "flipX": false,
+        "flipY": false,
+        "origin": [
+          80,
+          101
+        ],
+        "rotation": 0,
+        "sampling": "High quality",
+        "size": [
+          1020,
+          3
+        ]
+      }
+    },
+    {
+      "blendMode": "Normal",
+      "id": "5EDD43F0-E6A5-4D2D-BC20-E8AE90A64D9C",
+      "imageFile": "5EDD43F0-E6A5-4D2D-BC20-E8AE90A64D9C.png",
+      "isGroup": false,
+      "isVisible": true,
+      "linuxText": {
+        "alignment": "Left",
+        "bold": false,
+        "color": [
+          28,
+          51,
+          64
+        ],
+        "family": "Liberation Sans",
+        "italic": false,
+        "size": 24,
+        "text": "COMPOSITOR LINUX / ARCH + OMARCHY",
+        "underline": false,
+        "version": 1
+      },
+      "name": "COMPOSITOR LINUX / ARCH + OMARCHY",
+      "opacity": 1,
+      "transform": {
+        "flipX": false,
+        "flipY": false,
+        "origin": [
+          80,
+          57
+        ],
+        "rotation": 0,
+        "sampling": "High quality",
+        "size": [
+          476,
+          19
+        ]
+      }
+    },
+    {
+      "blendMode": "Normal",
+      "id": "5CAD9B8F-7D4C-4ED6-9A18-8967B9945BAF",
+      "imageFile": "5CAD9B8F-7D4C-4ED6-9A18-8967B9945BAF.png",
+      "isGroup": false,
+      "isVisible": true,
+      "linuxText": {
+        "alignment": "Left",
+        "bold": false,
+        "color": [
+          28,
+          51,
+          64
+        ],
+        "family": "Liberation Sans",
+        "italic": false,
+        "size": 35,
+        "text": "Layers. Pixels. Possibilities.",
+        "underline": false,
+        "version": 1
+      },
+      "name": "Layers. Pixels. Possibilities.",
+      "opacity": 1,
+      "transform": {
+        "flipX": false,
+        "flipY": false,
+        "origin": [
+          80,
+          458
+        ],
+        "rotation": 0,
+        "sampling": "High quality",
+        "size": [
+          425,
+          34
+        ]
+      }
+    },
+    {
+      "blendMode": "Normal",
+      "id": "2B76861B-B26B-4D88-A271-CC850296E45E",
+      "imageFile": "2B76861B-B26B-4D88-A271-CC850296E45E.png",
+      "isGroup": false,
+      "isVisible": true,
+      "linuxText": {
+        "alignment": "Left",
+        "bold": false,
+        "color": [
+          80,
+          94,
+          94
+        ],
+        "family": "Liberation Sans",
+        "italic": false,
+        "size": 26,
+        "text": "A little less friction.\nA little more room to create.",
+        "underline": false,
+        "version": 1
+      },
+      "name": "A little less friction.",
+      "opacity": 1,
+      "transform": {
+        "flipX": false,
+        "flipY": false,
+        "origin": [
+          80,
+          528
+        ],
+        "rotation": 0,
+        "sampling": "High quality",
+        "size": [
+          316,
+          50
+        ]
+      }
+    },
+    {
+      "blendMode": "Normal",
+      "id": "EE3D09D1-D5EB-4124-AB6B-D86492DD4B9D",
+      "imageFile": "EE3D09D1-D5EB-4124-AB6B-D86492DD4B9D.png",
+      "isGroup": false,
+      "isVisible": true,
+      "linuxText": {
+        "alignment": "Left",
+        "bold": false,
+        "color": [
+          80,
+          94,
+          94
+        ],
+        "family": "Liberation Sans",
+        "italic": false,
+        "size": 20,
+        "text": "01 / NATIVE WAYLAND",
+        "underline": false,
+        "version": 1
+      },
+      "name": "01 / NATIVE WAYLAND",
+      "opacity": 1,
+      "transform": {
+        "flipX": false,
+        "flipY": false,
+        "origin": [
+          80,
+          720
+        ],
+        "rotation": 0,
+        "sampling": "High quality",
+        "size": [
+          211,
+          16
+        ]
+      }
+    },
+    {
+      "blendMode": "Normal",
+      "id": "C47B8E10-D140-4856-9A52-834D22824A6E",
+      "imageFile": "C47B8E10-D140-4856-9A52-834D22824A6E.png",
+      "isGroup": false,
+      "isVisible": true,
+      "linuxText": {
+        "alignment": "Left",
+        "bold": true,
+        "color": [
+          28,
+          51,
+          64
+        ],
+        "family": "Liberation Sans",
+        "italic": false,
+        "size": 104,
+        "text": "MAKE\nSOMETHING.",
+        "underline": false,
+        "version": 1
+      },
+      "name": "MAKE",
+      "opacity": 1,
+      "transform": {
+        "flipX": false,
+        "flipY": false,
+        "origin": [
+          80.0,
+          160.0
+        ],
+        "rotation": 0,
+        "sampling": "High quality",
+        "size": [
+          649,
+          191
+        ]
+      }
+    }
+  ],
+  "resolution": 72,
+  "version": 7,
+  "width": 1200
+}

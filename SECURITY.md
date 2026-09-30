@@ -15,8 +15,14 @@ These limits reduce exposure and do not make image decoders a sandbox.
 
 Saving writes a sibling staging directory, fsyncs content, and atomically replaces
 an existing valid project. Failed validation or replacement keeps the old project.
-The per-user installer refuses to replace unrelated launcher files. It does not
-change Hyprland settings, add services, or request root access.
+The per-user installer refuses to replace unrelated primary launcher files and
+preserves a conflicting compatibility alias. It refuses to run as root and does
+not change Hyprland settings or add services. The explicit
+`--install-system-deps` option requests graphical administrator authorization for
+missing, named Arch prerequisites using `/usr/bin/pacman -S --needed`. Without
+that option it performs no elevated actions. Dependency installation does not
+refresh package databases or upgrade the system. Python dependencies remain in
+a project-local virtual environment; optional model downloads remain explicit.
 
 CI has read-only repository permissions, pinned actions, and no application
 credentials. Tests cover damaged manifests, unsafe assets, allocation budgets,
