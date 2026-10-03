@@ -236,6 +236,15 @@ covers selections, clone sources, brush modifiers, masks, clipping and adjustmen
 Tooltips show tool names and shortcuts. Menus remain available when the window
 manager intercepts a key combination.
 
+## Following upstream updates
+
+This fork tracks the original Mac project through a daily release report and
+weekly Linux CI. The report identifies shared kernel changes, project-format
+changes, and features that need Python/Qt porting. Updates go through review;
+monitoring does not change the installed editor. See the
+[maintenance guide](docs/upstream-maintenance.md) and the
+[daily Hermes prompt](docs/hermes-daily-prompt.md).
+
 ## Projects and compatibility
 
 `.comp` projects are directories containing a manifest and embedded PNG assets.

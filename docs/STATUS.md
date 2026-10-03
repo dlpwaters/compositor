@@ -89,3 +89,30 @@ editability.
 Next engineering step: collect the Mac reference corpus, compare with
 `scripts/linux-compare.py`, and qualify the remaining interactions and package
 installation on a clean Arch system.
+
+## Upstream maintenance
+
+The `maintenance/upstream-monitoring` branch adds a daily stable-release report,
+a single tracking issue updated only when its content changes, and weekly
+Linux CI to catch dependency drift. The baseline remains pinned to 1.0.4;
+no upstream feature or project-format update is implemented by this setup.
+Schedules activate when the workflow files are merged into the default branch.
+
+The initial live report resolves v1.4.5 to
+`086f1631573ccb2b57644e53b52bf1488fc976aa`, with 316 commits and 207 changed
+paths since baseline, including 10 shared C paths. Its project-format version
+is 11; Linux accepts 1–7. Review compatibility before sharing newer Mac saves.
+See [maintenance](upstream-maintenance.md) for the integration checklist and
+[the Hermes prompt](hermes-daily-prompt.md) for a separate daily digest.
+
+Local validation passes 156 tests, including 19 monitoring regressions covering
+complete diffs beyond 300 files, schema version detection, divergent history,
+stable report content, API failure, pinned issue updates and duplicate prevention.
+Ruff lint/format and actionlint validation of both workflows pass. The live
+watcher produced the initial report without changing the source checkout.
+The initial report is published in [issue #3](https://github.com/dlpwaters/compositor/issues/3).
+Its number is pinned to avoid discovery races in immediately repeated checks.
+
+Next maintenance step: review and merge the monitoring PR, then prioritize
+project formats 8–11 and changed C kernels in scoped update PRs. Native Wayland
+and real Mac/Linux round-trip qualification remain required for those changes.
