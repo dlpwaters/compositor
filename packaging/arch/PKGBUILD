@@ -9,7 +9,7 @@ license=('MIT')
 depends=('python' 'pyside6' 'python-numpy' 'python-pillow' 'python-scipy'
          'python-pillow-heif' 'qt6-svg' 'qt6-wayland')
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
-checkdepends=('python-pytest' 'desktop-file-utils')
+checkdepends=('python-pytest' 'desktop-file-utils' 'git')
 optdepends=('python-onnxruntime-cpu: local ONNX inference for background removal')
 source=("compositor_linux-$pkgver.tar.gz")
 # The archive is generated from the checkout being packaged, not a remote release.

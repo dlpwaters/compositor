@@ -73,6 +73,44 @@ class Canvas(QWidget):
         p = (event.position() - self.origin()) / self.screen_zoom
         return p.x(), p.y()
 
+    def snapped(self, point):
+        d = self.document
+        tolerance = 8 / self.screen_zoom
+        result = list(point)
+        for index, axis in enumerate(("vertical", "horizontal")):
+            candidates = []
+            if self.owner.snap_layers:
+                candidates.extend((0, d.width if index == 0 else d.height))
+                for layer, ancestors in d.entries():
+                    if (
+                        layer.visible
+                        and not layer.group
+                        and all(parent.visible for parent in ancestors)
+                    ):
+                        bounds = [
+                            layer.transform.point(u, v) for u, v in ((0, 0), (1, 0), (1, 1), (0, 1))
+                        ]
+                        values = [corner[index] for corner in bounds]
+                        candidates.extend(
+                            (min(values), (min(values) + max(values)) / 2, max(values))
+                        )
+            if self.owner.snap_guides:
+                candidates.extend(
+                    guide["position"]
+                    for guide in d.extras.get("guides", [])
+                    if guide["axis"] == axis
+                )
+            if self.owner.snap_grid:
+                step = self.owner.grid_spacing / min(
+                    self.owner.grid_subdivisions, self.owner.grid_spacing
+                )
+                candidates.append(round(result[index] / step) * step)
+            if candidates:
+                nearest = min(candidates, key=lambda value: abs(value - result[index]))
+                if abs(nearest - result[index]) <= tolerance:
+                    result[index] = nearest
+        return tuple(result)
+
     def screen(self, p):
         return self.origin() + QPointF(*p) * self.screen_zoom
 
@@ -100,6 +138,21 @@ class Canvas(QWidget):
     def invalidate(self):
         self.cached, self.selection_image = None, None
         self.update()
+
+    def mask_alone_image(self, region, scale):
+        layer = self.document.layer(self.owner.mask_alone_id)
+        if layer is None or layer.mask is None:
+            raise ValueError("Mask view is no longer available.")
+        _, _, width, height = region
+        size = max(1, math.ceil(width * scale)), max(1, math.ceil(height * scale))
+        dimensions(*size, raster=True)
+        if layer.mask.size == (1, 1):
+            gray = Image.new("L", size, layer.mask.getpixel((0, 0)))
+        else:
+            gray = engine.place(
+                layer.mask, layer.mask_transform or layer.transform, size, region[:2], scale, fill=0
+            )
+        return Image.merge("RGBA", (gray, gray, gray, Image.new("L", size, 255)))
 
     def resizeEvent(self, event):
         self.invalidate()
@@ -144,9 +197,13 @@ class Canvas(QWidget):
                     self.width() / scale,
                     self.height() / scale,
                 )
-                image = engine.render(d, region=region, scale=scale)
+                image = (
+                    self.mask_alone_image(region, scale)
+                    if self.owner.mask_alone_id
+                    else engine.render(d, region=region, scale=scale)
+                )
                 self.cached = qimage(image)
-                if d.selection is not None:
+                if d.selection is not None and not self.owner.mask_alone_id:
                     selection = engine.place(
                         d.selection,
                         Transform(width=d.width, height=d.height),
@@ -178,7 +235,53 @@ class Canvas(QWidget):
             ):
                 sy = round(origin.y() + y * self.screen_zoom)
                 painter.drawLine(left, sy, right, sy)
+        if self.owner.show_grid:
+            step = self.owner.grid_spacing / min(
+                self.owner.grid_subdivisions, self.owner.grid_spacing
+            )
+            if step * self.screen_zoom >= 4:
+                for axis, extent in ((0, d.width), (1, d.height)):
+                    start = max(
+                        0,
+                        int((-origin.x() if axis == 0 else -origin.y()) / self.screen_zoom / step),
+                    )
+                    stop = min(int(extent / step), start + 2048)
+                    for index in range(start, stop + 1):
+                        position = self.screen(
+                            (index * step, 0) if axis == 0 else (0, index * step)
+                        )
+                        major = (
+                            index % min(self.owner.grid_subdivisions, self.owner.grid_spacing) == 0
+                        )
+                        painter.setPen(QPen(QColor(90, 190, 245, 100 if major else 50), 1))
+                        if axis == 0:
+                            painter.drawLine(round(position.x()), top, round(position.x()), bottom)
+                        else:
+                            painter.drawLine(left, round(position.y()), right, round(position.y()))
+        if self.owner.show_guides:
+            painter.setPen(QPen(QColor("#42d5e5"), 1))
+            for guide in d.extras.get("guides", []):
+                coordinate = guide["position"]
+                if guide["axis"] == "vertical":
+                    sx = round(self.screen((coordinate, 0)).x())
+                    painter.drawLine(sx, top, sx, bottom)
+                else:
+                    sy = round(self.screen((0, coordinate)).y())
+                    painter.drawLine(left, sy, right, sy)
         painter.restore()
+        if self.owner.show_rulers:
+            painter.fillRect(0, 0, self.width(), 20, QColor("#353941"))
+            painter.fillRect(0, 0, 20, self.height(), QColor("#353941"))
+            painter.setPen(QPen(QColor("#c8d2de"), 1))
+            for axis, extent in ((0, d.width), (1, d.height)):
+                step = max(1, math.ceil(55 / self.screen_zoom / 10)) * 10
+                for value in range(0, extent + 1, step):
+                    point = self.screen((value, 0) if axis == 0 else (0, value))
+                    if axis == 0 and 20 <= point.x() < self.width():
+                        painter.drawLine(round(point.x()), 14, round(point.x()), 20)
+                        painter.drawText(round(point.x()) + 2, 12, str(value))
+                    elif axis == 1 and 20 <= point.y() < self.height():
+                        painter.drawLine(14, round(point.y()), 20, round(point.y()))
         painter.setPen(QPen(QColor("#151619"), 1))
         painter.drawRect(canvas)
         painter.setPen(QPen(QColor("#df84e8"), 1))
@@ -310,6 +413,8 @@ class Canvas(QWidget):
                 event.position(),
             )
             return
+        if o.tool in ("marquee", "shape", "crop"):
+            point = self.snapped(point)
         if o.tool == "text":
             target = None
             for layer, ancestors in self.document.entries(top_first=True):
@@ -329,7 +434,10 @@ class Canvas(QWidget):
                 max(0, min(point[0], self.document.width - 1)),
                 max(0, min(point[1], self.document.height - 1)),
             )
-            o.run(lambda: o.text_layer_dialog(position, target))
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                o.run(lambda: o.start_inline_text(position, target))
+            else:
+                o.run(lambda: o.text_layer_dialog(position, target))
             return
         if (
             o.tool == "eyedropper"
@@ -555,6 +663,11 @@ class Canvas(QWidget):
                 o.mask_target,
                 mode,
                 source,
+                **(
+                    {"blur_radius": options["blur_radius"]}
+                    if stroke_class is editing.Stroke
+                    else {}
+                ),
             )
             if modifiers & Qt.KeyboardModifier.ShiftModifier and self.last_stroke_point:
                 self.stroke.append(self.last_stroke_point)
@@ -577,6 +690,13 @@ class Canvas(QWidget):
     def continue_drag(self, event):
         point = self.document_point(event)
         drag, o = self.drag, self.owner
+        if (
+            o.tool in ("marquee", "shape", "crop")
+            and not event.modifiers() & Qt.KeyboardModifier.AltModifier
+        ):
+            point = self.snapped(point)
+        if drag["kind"] == "resize" and not event.modifiers() & Qt.KeyboardModifier.AltModifier:
+            point = self.snapped(point)
         if drag["kind"] == "pan":
             self.pan = drag["pan"] + event.position() - drag["screen"]
             self.invalidate()
@@ -663,12 +783,28 @@ class Canvas(QWidget):
                 if shift:
                     dx, dy = (dx, 0) if abs(dx) >= abs(dy) else (0, dy)
                 new = replace(t, x=t.x + dx, y=t.y + dy)
-                if not event.modifiers() & Qt.KeyboardModifier.AltModifier:
+                if not event.modifiers() & Qt.KeyboardModifier.AltModifier and (
+                    o.snap_layers or o.snap_guides or o.snap_grid
+                ):
                     tolerance = 8 / self.screen_zoom
                     d = o.history.document
-                    xs, ys = [0, d.width / 2, d.width], [0, d.height / 2, d.height]
+                    xs = [0, d.width / 2, d.width] if o.snap_layers else []
+                    ys = [0, d.height / 2, d.height] if o.snap_layers else []
+                    if o.snap_guides:
+                        for guide in d.extras.get("guides", []):
+                            (xs if guide["axis"] == "vertical" else ys).append(guide["position"])
+                    if o.snap_grid:
+                        step = o.grid_spacing / min(o.grid_subdivisions, o.grid_spacing)
+                        xs.extend(
+                            round((new.x + shift) / step) * step
+                            for shift in (0, new.width / 2, new.width)
+                        )
+                        ys.extend(
+                            round((new.y + shift) / step) * step
+                            for shift in (0, new.height / 2, new.height)
+                        )
                     moving = d.descendants(o.selected)
-                    for item, ancestors in d.entries():
+                    for item, ancestors in d.entries() if o.snap_layers else ():
                         if (
                             item.id not in moving
                             and item.visible
@@ -690,6 +826,8 @@ class Canvas(QWidget):
                         ("x", new.width, xs),
                         ("y", new.height, ys),
                     ):
+                        if not targets:
+                            continue
                         value = getattr(new, key)
                         closest, target = min(
                             (
@@ -874,9 +1012,12 @@ class Canvas(QWidget):
 
     def start_crop(self):
         d = self.owner.history.document
-        self.pending = dict(
-            kind="crop", document=d.clone(), rect=Transform(width=d.width, height=d.height)
-        )
+        bounds = d.selection.getbbox() if d.selection is not None else None
+        if bounds and bounds[2] > bounds[0] and bounds[3] > bounds[1]:
+            rect = Transform(bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1])
+        else:
+            rect = Transform(width=d.width, height=d.height)
+        self.pending = dict(kind="crop", document=d.clone(), rect=rect)
         self.invalidate()
 
     def start_transform(self):
@@ -933,13 +1074,20 @@ class Canvas(QWidget):
 
     def crop_ratio(self):
         d = self.owner.history.document
-        return {"Original": d.width / d.height, "1:1": 1, "4:3": 4 / 3, "16:9": 16 / 9}.get(
-            self.owner.options["crop_ratio"]
-        )
+        return {
+            "Original": d.width / d.height,
+            "1:1": 1,
+            "4:3": 4 / 3,
+            "3:4": 3 / 4,
+            "16:9": 16 / 9,
+            "9:16": 9 / 16,
+        }.get(self.owner.options["crop_ratio"])
 
     def update_crop(self, point, modifiers):
         drag = self.drag
         t, start = drag["original"], drag["start"]
+        if not modifiers & Qt.KeyboardModifier.ControlModifier:
+            point = self.snapped(point)
         ratio = self.crop_ratio()
         symmetric = bool(modifiers & Qt.KeyboardModifier.AltModifier)
         if drag["mode"] == "move":
@@ -967,11 +1115,27 @@ class Canvas(QWidget):
                 )
         d = self.owner.history.document
         xs, ys = [0, d.width], [0, d.height]
-        for layer, ancestors in d.entries():
-            if layer.visible and not layer.group and all(parent.visible for parent in ancestors):
-                corners = [layer.transform.point(u, v) for u, v in ((0, 0), (1, 0), (1, 1), (0, 1))]
-                xs.extend([min(x for x, _ in corners), max(x for x, _ in corners)])
-                ys.extend([min(y for _, y in corners), max(y for _, y in corners)])
+        if self.owner.snap_layers:
+            for layer, ancestors in d.entries():
+                if (
+                    layer.visible
+                    and not layer.group
+                    and all(parent.visible for parent in ancestors)
+                ):
+                    corners = [
+                        layer.transform.point(u, v) for u, v in ((0, 0), (1, 0), (1, 1), (0, 1))
+                    ]
+                    xs.extend([min(x for x, _ in corners), max(x for x, _ in corners)])
+                    ys.extend([min(y for _, y in corners), max(y for _, y in corners)])
+        if self.owner.snap_guides:
+            for guide in d.extras.get("guides", []):
+                (xs if guide["axis"] == "vertical" else ys).append(guide["position"])
+        if self.owner.snap_grid:
+            step = self.owner.grid_spacing / min(
+                self.owner.grid_subdivisions, self.owner.grid_spacing
+            )
+            xs.append(round(point[0] / step) * step)
+            ys.append(round(point[1] / step) * step)
         tolerance = 0 if modifiers & Qt.KeyboardModifier.ControlModifier else 8 / self.screen_zoom
         if drag["mode"] == "move":
             for attribute, size, targets in (("x", rect.width, xs), ("y", rect.height, ys)):

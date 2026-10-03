@@ -1,15 +1,38 @@
 # Linux parity audit
 
-Baseline: Compositor 1.0.4, upstream commit `a19db9011282399785dc18efcfded904627bdcc2`.
+Baseline: Compositor 1.4.5, upstream commit `11d8d7a50992b24fd9a760a1c13b1c01b70aaf30`.
 The original Swift app and its C kernels remain intact. The Linux implementation
 uses Qt Widgets/PySide6 for the native interface, Pillow/NumPy/SciPy for raster
 rendering, the original C routines for portable pixel operations, and an optional
 local ONNX segmentation model.
 
-**This does not yet establish a full 1:1 port.** The feature implementation is
-substantial and usable, but a macOS reference corpus, exhaustive interaction
-comparison, and performance qualification are still required. Source-derived
-tests can prove Linux behavior without proving byte-equivalent Mac output.
+**This is a functional port, not a certified pixel-identical replacement.**
+The 68-case real Mac-generated corpus loads, renders, saves and reopens on Linux;
+26 flattened PNG comparisons are byte-exact. Both tested Mac-generated PSD/PSB
+imports and the two Hard Mix references are byte-exact. Broader photographic,
+interaction and performance qualification remains separate from these tests.
+
+## Accepted rendering differences — 2026-10-03
+
+The maintainer explicitly accepted the following measured Linux/Mac differences
+for this integration. Acceptance does not turn these measurements into parity.
+These are synthetic 16×16 reference cases, not universal maximum error bounds.
+
+| Reference | Maximum straight-RGBA channel difference (0–255) | Notes |
+| --- | --- | --- |
+| Nondefault Motion Blur | 51 | Mean absolute difference 3.7803; bounded premultiplied CPU approximation of private Core Image behavior |
+| Hue blend | 13 | Premultiplied maximum 9; alpha maximum 1 |
+| Hue/Saturation | 8 | Premultiplied maximum 7; alpha exact |
+| Gaussian Blur | 7 | Premultiplied maximum 1; alpha maximum 1 |
+| Vivid Light | 7 | Premultiplied maximum 7; alpha maximum 1 |
+| Color Dodge | 6 | Premultiplied maximum 6; alpha maximum 1 |
+| Group/guides | 6 | Premultiplied maximum 1; alpha maximum 1 |
+
+Other small rounding differences remain in the corpus. Qt font shaping, CPU
+layer effects, bloom, RAW appearance and U2Net segmentation are platform
+substitutions, not Apple rendering implementations. Pixel-exact output is not
+promised for arbitrary projects. The Motion Blur regression test preserves the
+observed fixture error bound; it is not a test asserting exact Mac equality.
 
 ## Feature coverage
 
@@ -17,12 +40,12 @@ tests can prove Linux behavior without proving byte-equivalent Mac output.
 | --- | --- | --- |
 | Blank/imported layers and project tabs | Native layer tree and tabs; separate documents and viewports | Document/tab tests and live Wayland editor |
 | Folders, nesting, reorder, visibility, rename, duplicates | Pass-through hierarchy, native drag/drop and menus | Hierarchy, group duplicate, undo and clipping-reorder tests; exhaustive drag/drop UX comparison pending |
-| Opacity and 13 blend modes | Premultiplied compositing, separable/nonseparable blend formulas | Soft-alpha tests for every mode; Core Graphics golden comparison pending |
+| Opacity and 24 blend modes | Premultiplied compositing, separable/nonseparable blend formulas | Real Mac corpus plus strict Hard Mix quantization regressions; accepted numerical differences above |
 | Raster, folder, clipping masks | Uniform/placed masks, linked/unlinked affine movement, contiguous clipping stacks | Mask placement, hidden source, folder mask and shared-alpha tests |
 | Merge layer/down/group | Rasterizes selected subtree against transparency and retains parent | Masked-folder merge regression; Mac fixtures pending |
 | Move, scale, rotation, flips, multiple layers/folders | Source-preserving transforms, inspector, eight handles, ratio lock, auto-select, pending Apply/Cancel | Combined bounds, linked-mask and selection-transform tests; selected-pixel transform uses a numeric dialog rather than floating canvas controls |
 | Distort | Perspective raster transform through Ctrl-drag corner/edge handles; pending corners and Apply/Cancel | Convexity validation, source-preserving repeated previews, group mapping, flips and linked/unlinked mask tests; live Wayland preview/Apply/undo |
-| Snapping / guides | Canvas and sibling edge/center snapping; visible move guides; crop edge snapping | Implemented; golden geometry/interaction comparison pending |
+| Snapping / guides | Canvas and sibling edge/center snapping, persistent guides, rulers and grid | Schema/geometry/editor tests and Mac guide fixture; exhaustive physical interaction comparison pending |
 | Marquee, ellipse, freehand/polygon lasso, wand | Raster selections with add/subtract, move, feather, expand/contract | Wand kernel, selected-pixel move/duplicate, empty-selection clipping and Qt canvas tests; rasterized outline differs from Mac vector path |
 | Brush / eraser | Size, hardness, stroke opacity cap, Shift-line, canvas clipping, source expansion | Native Qt pointer stroke, mask painting, coverage and expansion tests |
 | Healing | Original heal kernel, content-aware / proximity / create texture | Synthetic native-kernel tests; photo corpus pending |
@@ -40,9 +63,9 @@ tests can prove Linux behavior without proving byte-equivalent Mac output.
 | Canvas/Image Size, crop, flips | Metadata/source resampling, anchored canvas changes, crop frame/handles/ratios and Apply/Cancel | Geometry, pending-edit tests, real Wayland crop Apply/undo; detailed Mac interaction comparison pending |
 | JPEG/PNG/HEIC/TIFF import, drops | Pillow, libheif binding, EXIF orientation, ICC conversion to sRGB | Synthetic import checks cover all four formats; broader inter-app drops remain pending |
 | PNG export / JPEG preview / Copy Merged | sRGB+DPI PNG; actual encoded JPEG preview with quality and matte; native clipboard | Export and matte/DPI tests; real Wayland Copy Merged/Paste compared pixel-for-pixel and prior clipboard restored |
-| `.comp` v1–7 | Strict validated read/write; preserves optional metadata and immutable embedded assets | Source-derived version fixtures, save/reopen and atomic replacement tests; real Mac round-trip corpus pending |
+| `.comp` v1–11 | Strict validated read/write; preserves optional metadata and immutable embedded assets | Real Mac-generated corpus qualified on Linux; version gates, save/reopen and atomic replacement tests |
 | Undo/redo | Shared immutable assets, revision-based dirty state, bounded snapshots | Rollback/undo/redo tests and live menu exercise |
-| macOS system integration and updates | Linux desktop entry, per-user installer, Arch package recipe | Native Wayland launcher/window observed; fresh Arch user install/reinstall/removal and headless renderer verified in a container; clean system package install and AUR publication pending |
+| macOS system integration and updates | Linux desktop entry, per-user installer, Arch package recipe | Native Wayland path, Arch user install/reinstall/removal, package build and installed pacman artifact qualified; no AUR publication |
 
 ## Platform substitutions
 

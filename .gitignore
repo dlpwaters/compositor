@@ -24,6 +24,8 @@ xcuserdata/
 BUILD_PLAN.md
 
 # Linux build, environments, and test output
+.runtime/
+.venv/
 linux/.venv/
 *.egg-info/
 __pycache__/

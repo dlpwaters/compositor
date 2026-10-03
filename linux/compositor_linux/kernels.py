@@ -8,6 +8,29 @@ import numpy as np
 from PIL import Image
 
 
+class DitherParams(C.Structure):
+    _fields_ = [
+        ("style", C.c_int),
+        ("levels", C.c_int),
+        ("diffusion", C.c_float),
+        ("density", C.c_float),
+        ("contrast", C.c_float),
+        ("cell", C.c_int),
+        ("angle", C.c_float),
+        ("lightOnDark", C.c_int),
+        ("originalColors", C.c_int),
+        ("dark", C.c_uint8 * 3),
+        ("light", C.c_uint8 * 3),
+        ("glyphWidth", C.c_int),
+        ("glyphHeight", C.c_int),
+        ("glyphs", C.c_void_p),
+        ("glyphCoverage", C.c_void_p),
+        ("glyphCount", C.c_int),
+        ("dots", C.c_float),
+        ("wobble", C.c_float),
+    ]
+
+
 @lru_cache(maxsize=1)
 def library():
     paths = list(Path(__file__).parent.glob("_pixels*.so"))
@@ -47,6 +70,22 @@ def library():
             ],
             C.c_long,
         ),
+        "color_range_mask": (
+            [
+                C.c_void_p,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_void_p,
+                C.c_int,
+                C.c_void_p,
+                C.c_int,
+                C.c_int,
+                C.c_int,
+                C.c_void_p,
+            ],
+            C.c_long,
+        ),
         "levels_apply": ([C.c_void_p, C.c_size_t, C.c_void_p], None),
         "levels_histogram": ([C.c_void_p, C.c_void_p, C.c_size_t, C.c_void_p], None),
         "noise_add": (
@@ -60,6 +99,134 @@ def library():
                 C.c_int,
                 C.c_uint32,
             ],
+            None,
+        ),
+        "noise_add_at": (
+            [
+                C.c_void_p,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_float,
+                C.c_int,
+                C.c_int,
+                C.c_uint32,
+                C.c_int64,
+                C.c_int64,
+            ],
+            None,
+        ),
+        "adjust_black_white": (
+            [
+                C.c_void_p,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_void_p,
+                C.c_int,
+                C.c_double,
+                C.c_double,
+            ],
+            None,
+        ),
+        "adjust_color_balance": (
+            [
+                C.c_void_p,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_void_p,
+                C.c_void_p,
+                C.c_void_p,
+                C.c_int,
+            ],
+            None,
+        ),
+        "adjust_colored_vignette": (
+            [
+                C.c_void_p,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_double,
+                C.c_double,
+                C.c_double,
+                C.c_double,
+                C.c_int,
+                C.c_double,
+                C.c_double,
+                C.c_double,
+                C.c_double,
+                C.c_double,
+                C.c_double,
+                C.c_double,
+                C.c_double,
+            ],
+            None,
+        ),
+        "adjust_tonal_contrast": (
+            [
+                C.c_void_p,
+                C.c_void_p,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_size_t,
+                C.c_double,
+                C.c_double,
+                C.c_double,
+                C.c_double,
+            ],
+            None,
+        ),
+        "adjust_camera_raw": (
+            [C.c_void_p] + [C.c_size_t] * 3 + [C.c_double] * 11 + [C.c_int],
+            None,
+        ),
+        "adjust_camera_raw_curve_color": (
+            [C.c_void_p]
+            + [C.c_size_t] * 3
+            + [C.c_void_p] * 4
+            + [
+                C.c_double,
+                C.c_void_p,
+                C.c_int,
+                C.c_void_p,
+                C.c_void_p,
+                C.c_double,
+                C.c_double,
+                C.c_int,
+            ],
+            None,
+        ),
+        "adjust_camera_raw_effects": (
+            [C.c_void_p]
+            + [C.c_size_t] * 3
+            + [C.c_double] * 4
+            + [C.c_int]
+            + [C.c_double] * 8
+            + [C.c_int, C.c_double],
+            None,
+        ),
+        "adjust_camera_raw_detail": ([C.c_void_p] + [C.c_size_t] * 3 + [C.c_double] * 11, None),
+        "adjust_camera_raw_optics": (
+            [C.c_void_p] + [C.c_size_t] * 3 + [C.c_int] * 2 + [C.c_double] * 12,
+            None,
+        ),
+        "adjust_camera_raw_calibration": (
+            [C.c_void_p] + [C.c_size_t] * 3 + [C.c_double] * 7 + [C.c_int],
+            None,
+        ),
+        "dither_apply": (
+            [C.c_void_p, C.c_size_t, C.c_size_t, C.c_size_t, C.POINTER(DitherParams)],
+            C.c_int,
+        ),
+        "dither_dots": (
+            [C.c_void_p, C.c_size_t, C.c_size_t, C.c_size_t, C.c_int, C.c_void_p],
+            None,
+        ),
+        "dither_glow": (
+            [C.c_void_p, C.c_void_p, C.c_size_t, C.c_size_t, C.c_size_t, C.c_float],
             None,
         ),
         "adjust_gradient_map": (
@@ -126,9 +293,66 @@ def mutate(image, operation, *arguments):
             data.ctypes.data, output.ctypes.data, width, height, width * 4, *arguments
         )
         data = output
+    elif operation == "adjust_black_white":
+        weights = np.ascontiguousarray(arguments[0], dtype=np.float32).reshape(6)
+        library().adjust_black_white(
+            data.ctypes.data, width, height, width * 4, weights.ctypes.data, *arguments[1:]
+        )
+    elif operation == "adjust_color_balance":
+        channels = [
+            np.ascontiguousarray(part, dtype=np.float32).reshape(3) for part in arguments[:3]
+        ]
+        library().adjust_color_balance(
+            data.ctypes.data,
+            width,
+            height,
+            width * 4,
+            *(part.ctypes.data for part in channels),
+            arguments[3],
+        )
+    elif operation == "adjust_tonal_contrast":
+        blurred = np.ascontiguousarray(arguments[0], dtype=np.uint8)
+        library().adjust_tonal_contrast(
+            data.ctypes.data,
+            blurred.ctypes.data,
+            width,
+            height,
+            width * 4,
+            width * 4,
+            *arguments[1:],
+        )
     else:
         getattr(library(), operation)(data.ctypes.data, width, height, width * 4, *arguments)
     return straight(data)
+
+
+def color_range(image, include, exclude=(), fuzziness=40, invert=False):
+    if not 0 <= fuzziness <= 200 or not include or len(include) > 32 or len(exclude) > 32:
+        raise ValueError("Invalid Color Range samples or fuzziness.")
+    for color in (*include, *exclude):
+        if len(color) != 3 or any(type(v) is not int or not 0 <= v <= 255 for v in color):
+            raise ValueError("Color Range samples must be 8-bit RGB colors.")
+    pixels = premultiply(image)
+    height, width = pixels.shape[:2]
+    in_colors = np.ascontiguousarray(include, dtype=np.uint8)
+    out_colors = np.ascontiguousarray(exclude if exclude else [(0, 0, 0)], dtype=np.uint8)
+    result = np.zeros((height, width), dtype=np.uint8)
+    count = library().color_range_mask(
+        pixels.ctypes.data,
+        width,
+        height,
+        width * 4,
+        in_colors.ctypes.data,
+        len(include),
+        out_colors.ctypes.data,
+        len(exclude),
+        int(fuzziness),
+        int(invert),
+        result.ctypes.data,
+    )
+    if count < 0:
+        raise MemoryError("Color Range mask allocation failed.")
+    return Image.fromarray(result)
 
 
 def fill(image, coverage):

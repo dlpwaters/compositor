@@ -10,7 +10,16 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageChops, ImageFilter, ImageOps
-from PySide6.QtCore import QByteArray, QMimeData, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import (
+    QByteArray,
+    QEventLoop,
+    QMimeData,
+    QSettings,
+    QSize,
+    Qt,
+    QThreadPool,
+    QTimer,
+)
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -29,6 +38,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QInputDialog,
+    QKeySequenceEdit,
     QLabel,
     QMainWindow,
     QMenu,
@@ -45,21 +55,27 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, editing, engine, kernels, models, store
+from . import __version__, editing, engine, kernels, models, raw, store
 from .canvas import Canvas, qimage
 from .dialogs import (
+    ColorRangeDialog,
+    EffectDialog,
     FilterDialog,
+    InlineTextEditor,
     JPEGDialog,
     NewLayerDialog,
+    ScrubLabel,
     SizeDialog,
     TextLayerDialog,
     TransformDialog,
+    TrimDialog,
     ValuesDialog,
     number,
 )
 from .icons import icon
 from .model import ADJUSTMENTS, BLENDS, Document, History, Layer, new_id
-from .tasks import run_task
+from .tasks import Job, Result, run_task
+from .text import render_text
 
 STYLE = """
 QMainWindow,QWidget { background:#292b30;color:#e6e7eb;font-size:13px; }
@@ -164,7 +180,8 @@ class ProjectTabs(QTabBar):
         self.setAcceptDrops(True)
         self.setTabsClosable(True)
         self.setExpanding(False)
-        self.setMovable(False)
+        self.setMovable(True)
+        self.tabMoved.connect(owner.tab_moved)
         self.currentChanged.connect(owner.switch_project)
         self.tabCloseRequested.connect(owner.close_project)
 
@@ -211,10 +228,13 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 560)
         self.resize(1280, 820)
         self.projects, self.viewports, self.selected = [], [], set()
+        self.save_jobs = {}
+        self.layer_clipboard = None
         self.current = -1
         self.preview_document = None
         self.filter_dialog = None
         self.content_dialog = None
+        self.inline_text = None
         self.text_options = dict(
             version=1,
             text="",
@@ -226,7 +246,7 @@ class MainWindow(QMainWindow):
             alignment="Left",
             color=[0, 0, 0],
         )
-        self.tool, self.mask_target = "move", False
+        self.tool, self.mask_target, self.mask_alone_id = "move", False, None
         self.foreground, self.background = (0, 0, 0, 255), (255, 255, 255, 255)
         self.clone_source, self.clone_offset = None, None
         self.pixel_grid, self.transform_controls = True, True
@@ -237,6 +257,7 @@ class MainWindow(QMainWindow):
             brush_mode="Paint",
             heal_mode="Content-Aware",
             smear_mode="Liquify",
+            blur_radius=10,
             aligned=True,
             sample_all=False,
             sample_radius=0,
@@ -256,6 +277,17 @@ class MainWindow(QMainWindow):
             locks_transform_ratio=True,
         )
         self.settings = QSettings("Compositor", "CompositorLinux")
+        for key, default in self.options.items():
+            if self.settings.contains("tools/" + key):
+                self.options[key] = self.settings.value("tools/" + key, default, type=type(default))
+        self.show_guides = True
+        self.show_grid = False
+        self.show_rulers = False
+        self.snap_guides = True
+        self.snap_grid = False
+        self.snap_layers = True
+        self.grid_spacing = max(2, min(4096, int(self.settings.value("gridSpacing", 64))))
+        self.grid_subdivisions = max(1, min(64, int(self.settings.value("gridSubdivisions", 8))))
         self.updating = False
         self.document_actions = []
         self.actions = {}
@@ -265,6 +297,10 @@ class MainWindow(QMainWindow):
         if geometry:
             self.restoreGeometry(geometry)
         self.refresh()
+        self.external_timer = QTimer(self)
+        self.external_timer.setInterval(2000)
+        self.external_timer.timeout.connect(self.check_external_changes)
+        self.external_timer.start()
 
     @property
     def history(self):
@@ -299,6 +335,14 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(new)
         self.tabs = ProjectTabs(self)
         toolbar.addWidget(self.tabs)
+        self.tab_overflow = QToolButton(self)
+        self.tab_overflow.setText("▾")
+        self.tab_overflow.setToolTip("Open project tabs")
+        self.tab_overflow.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.tab_overflow_menu = QMenu(self.tab_overflow)
+        self.tab_overflow.setMenu(self.tab_overflow_menu)
+        self.tab_overflow_menu.aboutToShow.connect(self.refresh_tab_overflow)
+        toolbar.addWidget(self.tab_overflow)
         spacer = QWidget()
         spacer.setSizePolicy(
             spacer.sizePolicy().Policy.Expanding, spacer.sizePolicy().Policy.Preferred
@@ -435,7 +479,8 @@ class MainWindow(QMainWindow):
     ):
         action = QAction(label, self)
         if shortcut:
-            action.setShortcut(QKeySequence(shortcut))
+            action.setShortcut(QKeySequence(self.settings.value("shortcuts/" + label, shortcut)))
+            action.setProperty("defaultShortcut", shortcut)
         action.setCheckable(checkable)
         action.setChecked(checked)
         action.triggered.connect(
@@ -448,6 +493,33 @@ class MainWindow(QMainWindow):
         if document:
             self.document_actions.append(action)
         return action
+
+    def set_shortcut(self, label, sequence):
+        if label not in self.actions or not self.actions[label].property("defaultShortcut"):
+            raise ValueError("This action has no editable shortcut.")
+        shortcut = QKeySequence(sequence)
+        if shortcut.isEmpty():
+            raise ValueError("Choose a keyboard shortcut.")
+        for name, action in self.actions.items():
+            if name != label and action.shortcut() == shortcut:
+                raise ValueError(f"Shortcut already assigned to {name}.")
+        self.actions[label].setShortcut(shortcut)
+        self.settings.setValue("shortcuts/" + label, shortcut.toString())
+
+    def edit_shortcuts(self):
+        names = sorted(
+            name for name, action in self.actions.items() if action.property("defaultShortcut")
+        )
+        name, chosen = QInputDialog.getItem(
+            self, "Keyboard Shortcuts", "Action", names, editable=False
+        )
+        if not chosen:
+            return
+        dialog = ValuesDialog("Shortcut for " + name, self)
+        editor = QKeySequenceEdit(self.actions[name].shortcut())
+        dialog.form.addRow("Keys", editor)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.set_shortcut(name, editor.keySequence().toString())
 
     def build_menus(self):
         file = self.menuBar().addMenu("File")
@@ -468,9 +540,12 @@ class MainWindow(QMainWindow):
                 key,
                 document=label not in ("New Canvas…", "Open Project…", "Import Images…"),
             )
+        self.recent_menu = file.addMenu("Open Recent")
+        self.refresh_recent()
         file.addSeparator()
         self.action(file, "Quit", self.close, "Ctrl+Q", document=False)
         edit = self.menuBar().addMenu("Edit")
+        self.action(edit, "Keyboard Shortcuts…", self.edit_shortcuts, document=False)
         for label, func, key in (
             ("Undo", lambda: self.history.undo(), "Ctrl+Z"),
             ("Redo", lambda: self.history.redo(), "Ctrl+Shift+Z"),
@@ -495,6 +570,10 @@ class MainWindow(QMainWindow):
             ),
         ):
             self.action(edit, label, func, key, document=label != "Paste")
+        self.action(edit, "Copy Layers", self.copy_selected_layers, "Ctrl+Alt+Shift+C")
+        self.action(
+            edit, "Paste Layers", self.paste_copied_layers, "Ctrl+Alt+Shift+V", document=False
+        )
         select = self.menuBar().addMenu("Select")
         for label, func, key in (
             ("All", lambda: self.selection_command("all"), "Ctrl+A"),
@@ -505,6 +584,8 @@ class MainWindow(QMainWindow):
             ("Feather…", lambda: self.selection_command("feather"), None),
             ("Load Layer Pixels", lambda: self.load_selection(False), None),
             ("Load Layer Mask", lambda: self.load_selection(True), None),
+            ("Color Range…", self.select_color_range, None),
+            ("Object Selection (local model)…", self.select_object, None),
         ):
             self.action(select, label, func, key)
         image = self.menuBar().addMenu("Image")
@@ -515,6 +596,8 @@ class MainWindow(QMainWindow):
             ("Exposure", None),
             ("Gradient Map", None),
             ("Grain", None),
+            ("Black & White", None),
+            ("Color Balance", None),
             ("Invert", "Ctrl+I"),
         ):
             self.action(
@@ -526,6 +609,7 @@ class MainWindow(QMainWindow):
         image.addSeparator()
         self.action(image, "Canvas Size…", lambda: self.size_dialog("Canvas Size"), "Ctrl+Alt+C")
         self.action(image, "Image Size…", lambda: self.size_dialog("Image Size"), "Ctrl+Alt+I")
+        self.action(image, "Trim…", self.trim_document)
         self.action(
             image,
             "Flip Canvas Horizontal",
@@ -541,6 +625,11 @@ class MainWindow(QMainWindow):
             "Gaussian Blur",
             "Motion Blur",
             "Add Noise",
+            "Dither",
+            "Vignette",
+            "Bloom / Glow",
+            "Tonal Contrast",
+            "Camera Raw Filter",
             "Lens Correction",
             "Remove Background",
         ):
@@ -550,9 +639,14 @@ class MainWindow(QMainWindow):
         for kind in ADJUSTMENTS:
             self.action(adjustments, kind, lambda k=kind: self.new_adjustment(k))
         self.action(layer, "Edit Adjustment…", self.edit_adjustment)
+        self.action(layer, "Ungroup", self.ungroup_selected, "Ctrl+Shift+G")
+        effects_menu = layer.addMenu("Layer Effects")
+        for kind in EffectDialog.KINDS:
+            self.action(effects_menu, kind + "…", lambda k=kind: self.edit_effect(k))
         self.action(layer, "New Layer…", self.new_layer_dialog, "Ctrl+Shift+N")
         self.action(layer, "New Solid Color Layer…", lambda: self.new_layer_dialog(solid=True))
         self.action(layer, "New Text Layer…", self.text_layer_dialog)
+        self.action(layer, "Edit Text on Canvas", self.start_inline_text)
         self.action(layer, "Edit Layer Content…", self.edit_layer_content)
         for label, func, key in (
             ("Transform…", self.transform_dialog, "Ctrl+T"),
@@ -612,6 +706,25 @@ class MainWindow(QMainWindow):
             checkable=True,
             checked=True,
         )
+        for label, attr, checked in (
+            ("Rulers", "show_rulers", False),
+            ("Guides", "show_guides", True),
+            ("Grid", "show_grid", False),
+            ("Snap To Guides", "snap_guides", True),
+            ("Snap To Grid", "snap_grid", False),
+            ("Snap To Layers", "snap_layers", True),
+        ):
+            self.action(
+                view,
+                label,
+                lambda state, name=attr: self.set_view_flag(name, state),
+                checkable=True,
+                checked=checked,
+            )
+        self.action(view, "Add Horizontal Guide…", lambda: self.add_guide("horizontal"))
+        self.action(view, "Add Vertical Guide…", lambda: self.add_guide("vertical"))
+        self.action(view, "Clear Guides", self.clear_guides)
+        self.action(view, "Grid Settings…", self.set_grid)
         self.action(
             view,
             "Transform Controls",
@@ -712,7 +825,7 @@ class MainWindow(QMainWindow):
                     item.setIcon(1, QIcon(QPixmap.fromImage(qimage(mask_image))))
                     item.setToolTip(
                         1,
-                        "Click to edit mask; Shift-click to enable or disable; Ctrl-click to load selection",
+                        "Click to edit; Alt-click to view mask; Shift-click to toggle; Ctrl-click to select",
                     )
                 parent = items.get(layer.parent)
                 parent.addChild(item) if parent else self.tree.addTopLevelItem(item)
@@ -724,8 +837,13 @@ class MainWindow(QMainWindow):
                 self.blend.setCurrentText(layer.blend)
                 self.opacity.setValue(layer.opacity * 100)
                 self.blend.setEnabled(not layer.group)
-                self.opacity.setEnabled(not layer.group)
+                self.opacity.setEnabled(True)
             self.mask_target = self.mask_target and layer is not None and layer.mask is not None
+            if self.mask_alone_id and (
+                h.document.layer(self.mask_alone_id) is None
+                or h.document.layer(self.mask_alone_id).mask is None
+            ):
+                self.mask_alone_id = None
         self.updating = False
         self.refresh_options()
         self.canvas.invalidate()
@@ -768,8 +886,8 @@ class MainWindow(QMainWindow):
             self.option_layout.addWidget(box)
 
         def spin(key, label, lo, hi, factor=1):
-            self.option_layout.addWidget(QLabel(label))
             box = number(self.options[key] * factor, lo, hi, 1 if factor == 100 else 0)
+            self.option_layout.addWidget(ScrubLabel(label, box))
             box.setMaximumWidth(85)
             box.valueChanged.connect(lambda value, k=key, f=factor: self.set_option(k, value / f))
             self.option_layout.addWidget(box)
@@ -787,6 +905,8 @@ class MainWindow(QMainWindow):
                 choice("heal_mode", ["Content-Aware", "Create Texture", "Proximity Match"])
             if self.tool == "smear":
                 choice("smear_mode", ["Liquify", "Blur", "Smudge"])
+                if self.options["smear_mode"] == "Blur":
+                    spin("blur_radius", "Radius", 1, 50)
             if self.tool == "clone":
                 check("aligned", "Aligned")
                 check("sample_all", "Sample all layers")
@@ -822,6 +942,7 @@ class MainWindow(QMainWindow):
             for label, callback in (
                 ("Add Text…", self.text_layer_dialog),
                 ("Edit Selected Text…", self.edit_layer_content),
+                ("Edit on Canvas", self.start_inline_text),
             ):
                 button = QPushButton(label)
                 button.setIcon(icon("text"))
@@ -869,7 +990,7 @@ class MainWindow(QMainWindow):
                 )
                 self.option_layout.addWidget(scale)
         elif self.tool == "crop":
-            choice("crop_ratio", ["Free", "Original", "1:1", "4:3", "16:9"], "Ratio")
+            choice("crop_ratio", ["Free", "Original", "1:1", "4:3", "3:4", "16:9", "9:16"], "Ratio")
             self.option_layout.addWidget(QLabel("Alt: symmetric · Enter: apply · Escape: cancel"))
         if self.canvas.pending:
             for label, callback in (
@@ -921,6 +1042,7 @@ class MainWindow(QMainWindow):
 
     def set_option(self, key, value):
         self.options[key] = value
+        self.settings.setValue("tools/" + key, value)
         if key == "brush_mode":
             self.tool_buttons["brush"].setIcon(icon("eraser" if value == "Erase" else "brush"))
         self.canvas.refresh_pending()
@@ -949,12 +1071,96 @@ class MainWindow(QMainWindow):
         history = History(document)
         if path:
             history.saved(path)
+            self.remember_project(path)
+            history.disk_digest = store.digest(path)
         self.projects.append(history)
         self.viewports.append(None)
         self.switch_project(len(self.projects) - 1)
         self.refresh()
         self.canvas.fit()
         return history
+
+    def recent_projects(self):
+        value = self.settings.value("recentProjects", [])
+        return (
+            [str(item) for item in value if isinstance(item, str)][:10]
+            if isinstance(value, list)
+            else []
+        )
+
+    def remember_project(self, path):
+        item = str(Path(path).resolve())
+        recent = [item] + [old for old in self.recent_projects() if old != item]
+        self.settings.setValue("recentProjects", recent[:10])
+        if hasattr(self, "recent_menu"):
+            self.refresh_recent()
+
+    def refresh_recent(self):
+        self.recent_menu.clear()
+        for path in self.recent_projects():
+            item = self.recent_menu.addAction(path)
+            item.setEnabled(Path(path).is_dir())
+            item.triggered.connect(lambda _, p=path: self.run(lambda: self.open_paths([p])))
+        if not self.recent_projects():
+            self.recent_menu.addAction("No recent projects").setEnabled(False)
+
+    def tab_moved(self, source, destination):
+        if not (0 <= source < len(self.projects) and 0 <= destination < len(self.projects)):
+            return
+        current = self.history
+        self.projects.insert(destination, self.projects.pop(source))
+        self.viewports.insert(destination, self.viewports.pop(source))
+        self.current = self.projects.index(current) if current else -1
+        self.refresh()
+
+    def refresh_tab_overflow(self):
+        self.tab_overflow_menu.clear()
+        for index, history in enumerate(self.projects):
+            title = history.path.stem if history.path else f"Untitled {index + 1}"
+            action = self.tab_overflow_menu.addAction(title)
+            action.setCheckable(True)
+            action.setChecked(index == self.current)
+            action.triggered.connect(lambda _, i=index: self.switch_project(i))
+
+    def check_external_changes(self):
+        history = self.history
+        if (
+            history is None
+            or history.path is None
+            or self.preview_document is not None
+            or self.filter_dialog is not None
+            or self.content_dialog is not None
+            or self.canvas.pending
+            or id(history) in self.save_jobs
+        ):
+            return
+        try:
+            digest = store.digest(history.path)
+            if digest == getattr(history, "disk_digest", None):
+                return
+            replacement = store.load(history.path)
+        except (OSError, ValueError):
+            # A package being replaced or synchronized is retried on the next tick.
+            return
+        if history.dirty:
+            answer = QMessageBox.question(
+                self,
+                "Project changed on disk",
+                "Another app changed this project. Revert your unsaved changes?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                history.disk_digest = digest
+                return
+        history.document = replacement
+        history.undo_stack.clear()
+        history.redo_stack.clear()
+        history.revision = new_id()
+        history.saved(history.path)
+        history.disk_digest = digest
+        self.selected &= {layer.id for layer in replacement.layers}
+        self.refresh()
 
     def switch_project(self, index):
         if index == self.current or not 0 <= index < len(self.projects):
@@ -963,7 +1169,7 @@ class MainWindow(QMainWindow):
             self.viewports[self.current] = self.canvas.zoom, self.canvas.pan
         self.canvas.resolve_pending()
         self.preview_document = None
-        self.current, self.mask_target = index, False
+        self.current, self.mask_target, self.mask_alone_id = index, False, None
         self.selected = {self.history.document.active} if self.history.document.active else set()
         saved = self.viewports[index]
         if saved:
@@ -1052,6 +1258,71 @@ class MainWindow(QMainWindow):
                 self.selected, self.mask_target = {result.id}, False
             self.text_options = dict(settings, text="")
 
+    def start_inline_text(self, position=None, layer_id=None):
+        if self.history is None or self.inline_text is not None:
+            return
+        document = self.history.document
+        if layer_id is None and position is None:
+            active = document.layer()
+            layer_id = active.id if active and active.live_text is not None else None
+        layer = document.layer(layer_id) if layer_id else None
+        if layer_id and (layer is None or layer.live_text is None):
+            raise ValueError("Select an editable text layer.")
+        settings = dict(layer.live_text.settings) if layer else dict(self.text_options, text="")
+        if layer is None:
+            settings["color"] = list(self.foreground[:3])
+        position = position or (
+            (layer.transform.x, layer.transform.y)
+            if layer
+            else (document.width * 0.1, document.height * 0.1)
+        )
+        zoom = max(0.1, self.canvas.screen_zoom)
+        editor = InlineTextEditor(settings, zoom, self.canvas)
+        box = (settings.get("macText") or {}).get("boxSize")
+        editor.resize(
+            min(self.canvas.width(), max(310, round((box or [300])[0] * zoom))),
+            min(
+                self.canvas.height(),
+                max(180, round(((box or [300, 140])[1] if box else 140) * zoom + 75)),
+            ),
+        )
+        point = self.canvas.screen(position)
+        editor.move(
+            max(0, min(round(point.x()), self.canvas.width() - editor.width())),
+            max(0, min(round(point.y()), self.canvas.height() - editor.height())),
+        )
+        if layer is not None:
+            self.preview_document = document.clone()
+            self.preview_document.layer(layer.id).visible = False
+        self.inline_text = self.content_dialog = editor
+        editor.finished.connect(
+            lambda accepted: self.finish_inline_text(accepted, position, layer_id)
+        )
+        editor.show()
+        editor.track_resize = True
+        editor.editor.setFocus()
+        self.canvas.invalidate()
+
+    def finish_inline_text(self, accepted, position, layer_id):
+        editor = self.inline_text
+        if editor is None:
+            return
+        if accepted:
+            try:
+                settings = editor.settings()
+                pixels = render_text(settings)
+                with self.history.edit("Edit Text" if layer_id else "New Text Layer") as document:
+                    layer = editing.put_text(document, settings, pixels, position, layer_id)
+                    self.selected, self.mask_target = {layer.id}, False
+                self.text_options = dict(settings, text="")
+            except ValueError as exc:
+                self.fail(exc)
+                return
+        self.inline_text = self.content_dialog = self.preview_document = None
+        editor.hide()
+        editor.deleteLater()
+        self.refresh()
+
     def edit_layer_content(self):
         layer = self.history.document.layer()
         if layer is not None and layer.live_text is not None:
@@ -1084,7 +1355,7 @@ class MainWindow(QMainWindow):
             self,
             "Import Images",
             str(Path.home()),
-            "Images (*.png *.jpg *.jpeg *.heic *.heif *.tif *.tiff);;All Files (*)",
+            "Images (*.png *.jpg *.jpeg *.heic *.heif *.tif *.tiff *.svg *.psd *.psb *.dng *.cr2 *.cr3 *.nef *.arw *.raf *.orf *.rw2);;All Files (*)",
         )
         if paths:
             self.open_paths(paths, True)
@@ -1106,6 +1377,45 @@ class MainWindow(QMainWindow):
                     self.switch_project(already)
                 else:
                     self.add_project(store.load(p), p)
+            elif p.suffix.lower() in (".psd", ".psb"):
+                from .psd import load as import_psd
+
+                result = import_psd(p)
+                if result.conversions:
+                    details = "\n".join(result.conversions)
+                    answer = QMessageBox.question(
+                        self,
+                        "Photoshop import conversions",
+                        "Review conversions before opening this file:\n\n" + details,
+                        QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Cancel,
+                        QMessageBox.StandardButton.Cancel,
+                    )
+                    if answer != QMessageBox.StandardButton.Open:
+                        continue
+                self.add_project(result.document)
+            elif p.suffix.lower() in raw.EXTENSIONS:
+                dialog = ValuesDialog("Develop Camera RAW", self)
+                dialog.add_number("Exposure (stops)", 0, -5, 5, 2)
+                dialog.add_number("Temperature (K)", 5000, 2000, 50000)
+                dialog.add_number("Tint", 0, -100, 100)
+                dialog.add_number("Boost", 1, 0, 1, 2)
+                dialog.form.addRow(
+                    QLabel("Develop to 8-bit sRGB pixels with the local LibRaw decoder.")
+                )
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    continue
+                options = dict(
+                    exposure=dialog.value("Exposure (stops)"),
+                    temperature=dialog.value("Temperature (K)"),
+                    tint=dialog.value("Tint"),
+                    boost=dialog.value("Boost"),
+                )
+                images.append(
+                    (
+                        p.stem,
+                        run_task(self, "Developing camera RAW…", lambda: raw.develop(p, options)),
+                    )
+                )
             else:
                 images.append((p.stem, store.import_image(p)))
         if images:
@@ -1117,10 +1427,13 @@ class MainWindow(QMainWindow):
             self.refresh()
             self.canvas.fit()
 
-    def save_project(self, as_new=False):
+    def save_project(self, as_new=False, wait=False):
         if self.history is None:
             return False
-        path = self.history.path
+        history = self.history
+        if id(history) in self.save_jobs:
+            return self.wait_for_save(history) if wait else False
+        path = history.path
         if as_new or path is None:
             value, _ = QFileDialog.getSaveFileName(
                 self,
@@ -1133,15 +1446,49 @@ class MainWindow(QMainWindow):
             path = Path(value)
             if path.suffix.lower() != ".comp":
                 path = path.with_name(path.name + ".comp")
-        store.save(self.history.document, path)
-        self.history.saved(path)
-        self.refresh()
-        return True
+        snapshot, revision = history.document.frozen(), history.revision
+        history.save_error = None
+        result = Result()
+        pool = QThreadPool(self)
+        pool.setMaxThreadCount(1)
+
+        def finished(_, error):
+            self.save_jobs.pop(id(history), None)
+            if error is not None:
+                history.save_error = error
+                self.fail(error)
+            else:
+                history.save_error = None
+                history.path = path
+                history.saved_revision = revision
+                history.disk_digest = store.digest(path)
+                self.remember_project(path)
+            self.refresh()
+
+        result.ready.connect(finished, Qt.ConnectionType.QueuedConnection)
+        self.save_jobs[id(history)] = (pool, result)
+        pool.start(Job(lambda: store.save(snapshot, path), result))
+        self.update_status("Saving project…")
+        return self.wait_for_save(history) if wait else True
+
+    def wait_for_save(self, history=None):
+        history = history or self.history
+        if history is None:
+            return True
+        job = self.save_jobs.get(id(history))
+        if job:
+            loop = QEventLoop()
+            job[1].ready.connect(loop.quit, Qt.ConnectionType.QueuedConnection)
+            loop.exec()
+            job[0].waitForDone()
+        return getattr(history, "save_error", None) is None
 
     def close_project(self, index):
         if not 0 <= index < len(self.projects):
             return False
         self.switch_project(index)
+        if not self.wait_for_save(self.history):
+            return False
         if self.history.dirty:
             answer = QMessageBox.question(
                 self,
@@ -1154,7 +1501,7 @@ class MainWindow(QMainWindow):
             if (
                 answer == QMessageBox.StandardButton.Cancel
                 or answer == QMessageBox.StandardButton.Save
-                and not self.save_project()
+                and not self.save_project(wait=True)
             ):
                 return False
         del self.projects[index]
@@ -1182,6 +1529,7 @@ class MainWindow(QMainWindow):
                     event.ignore()
                     return
             self.settings.setValue("geometry", self.saveGeometry())
+            self.external_timer.stop()
             self.canvas.timer.stop()
             event.accept()
         except Exception as exc:
@@ -1231,6 +1579,8 @@ class MainWindow(QMainWindow):
             if current
             else next(iter(self.selected), None)
         )
+        if self.mask_alone_id != self.history.document.active:
+            self.mask_alone_id = None
         self.mask_target = False
         self.refresh_options()
         self.canvas.invalidate()
@@ -1253,15 +1603,40 @@ class MainWindow(QMainWindow):
     def layer_clicked(self, item, column):
         if self.history is None:
             return
-        self.history.document.active = item.data(0, Qt.ItemDataRole.UserRole)
-        self.mask_target = column == 1 and self.history.document.layer().mask is not None
+        id = item.data(0, Qt.ItemDataRole.UserRole)
         modifiers = QApplication.keyboardModifiers()
+        if column == 1 and modifiers & Qt.KeyboardModifier.AltModifier:
+            self.toggle_mask_alone(id)
+            return
+        self.select_layer_target(id, mask=column == 1)
         if modifiers & Qt.KeyboardModifier.ControlModifier:
             self.run(lambda: self.load_selection(self.mask_target))
         elif column == 1 and modifiers & Qt.KeyboardModifier.ShiftModifier:
             self.run(self.toggle_mask)
         elif column == 2:
             self.run(self.link_mask)
+
+    def select_layer_target(self, id, mask=False):
+        layer = self.history.document.layer(id)
+        if layer is None:
+            raise ValueError("Layer is unavailable.")
+        self.history.document.active = id
+        self.selected = {id}
+        self.mask_target = bool(mask and layer.mask is not None)
+        if not self.mask_target or self.mask_alone_id != id:
+            self.mask_alone_id = None
+        self.refresh_options()
+        self.canvas.invalidate()
+
+    def toggle_mask_alone(self, id):
+        layer = self.history.document.layer(id)
+        if layer is None or layer.mask is None:
+            self.mask_alone_id = None
+            return
+        self.history.document.active = id
+        self.selected = {id}
+        self.mask_target = True
+        self.mask_alone_id = None if self.mask_alone_id == id else id
         self.refresh_options()
         self.canvas.invalidate()
 
@@ -1278,6 +1653,8 @@ class MainWindow(QMainWindow):
         for name in (
             "Edit Layer Content…",
             "Duplicate / Layer via Copy",
+            "Copy Layers",
+            "Paste Layers",
             "Rename Layer…",
             "Group Selected Layers",
             "Merge",
@@ -1366,6 +1743,10 @@ class MainWindow(QMainWindow):
         if create:
             new_layer = Layer.blank(d.width, d.height, kind)
             new_layer.adjustment = {"kind": kind}
+            if kind == "Add Noise":
+                import secrets
+
+                new_layer.adjustment["noiseSeed"] = secrets.randbits(32)
             editing.inserted(d, new_layer)
             adjustment_id = new_layer.id
         layer = d.layer(adjustment_id)
@@ -1400,7 +1781,7 @@ class MainWindow(QMainWindow):
                     else None
                 )
             histogram = kernels.histogram(histogram_image, histogram_mask)
-        dialog = FilterDialog(kind, settings, self, histogram)
+        dialog = FilterDialog(kind, settings, self, histogram, adjustment=bool(adjustment_id))
         if kind == "Levels":
             sample_image = histogram_image
             sample_matrix = (
@@ -1473,6 +1854,79 @@ class MainWindow(QMainWindow):
     def new_adjustment(self, kind):
         self.filter(kind, create=True)
 
+    def set_view_flag(self, name, state):
+        setattr(self, name, state)
+        self.canvas.invalidate()
+
+    def add_guide(self, axis):
+        if self.history is None:
+            return
+        document = self.history.document
+        extent = document.height if axis == "horizontal" else document.width
+        position, accepted = QInputDialog.getDouble(
+            self, "Add Guide", "Position (px)", extent / 2, -1_000_000, 1_000_000, 2
+        )
+        if accepted:
+            with self.history.edit("Add Guide") as draft:
+                draft.extras.setdefault("guides", []).append(
+                    dict(id=new_id(), axis=axis, position=position)
+                )
+            self.canvas.invalidate()
+
+    def clear_guides(self):
+        if self.history and self.history.document.extras.get("guides"):
+            with self.history.edit("Clear Guides") as draft:
+                draft.extras.pop("guides", None)
+            self.canvas.invalidate()
+
+    def set_grid(self):
+        spacing, accepted = QInputDialog.getInt(
+            self, "Grid Settings", "Spacing (px)", self.grid_spacing, 2, 4096
+        )
+        if not accepted:
+            return
+        subdivisions, accepted = QInputDialog.getInt(
+            self, "Grid Settings", "Subdivisions", self.grid_subdivisions, 1, min(64, spacing)
+        )
+        if accepted:
+            self.grid_spacing, self.grid_subdivisions = spacing, subdivisions
+            self.settings.setValue("gridSpacing", spacing)
+            self.settings.setValue("gridSubdivisions", subdivisions)
+            self.canvas.invalidate()
+
+    def edit_effect(self, kind):
+        layer = self.history.document.layer()
+        if layer is None or layer.group or layer.image is None:
+            raise ValueError("Select a pixel layer to edit its effects.")
+        key = EffectDialog.KINDS[kind]
+        existing = layer.extras.get("effects", {})
+        dialog = EffectDialog(kind, existing.get(key), self)
+        original = self.history.document.clone()
+
+        def preview(value):
+            draft = original.clone()
+            draft.layer(layer.id).extras.setdefault("effects", {})[key] = value
+            self.preview_document = draft
+            self.canvas.invalidate()
+
+        dialog.preview.connect(preview)
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                with self.history.edit("Layer Effect") as document:
+                    document.layer(layer.id).extras.setdefault("effects", {})[key] = (
+                        dialog.result_settings()
+                    )
+        finally:
+            dialog.timer.stop()
+            dialog.deleteLater()
+            self.preview_document = None
+            self.canvas.invalidate()
+
+    def ungroup_selected(self):
+        editing.ungroup(self.history, self.selected)
+        self.selected = {self.history.document.active} if self.history.document.active else set()
+        self.refresh()
+
     def edit_adjustment(self):
         layer = self.history.document.layer()
         if layer and layer.adjustment:
@@ -1505,6 +1959,25 @@ class MainWindow(QMainWindow):
                 dialog.value("Resolution (ppi)"),
                 dialog.value("Resample"),
             )
+        self.canvas.fit()
+
+    def trim_document(self):
+        dialog = TrimDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        based_on, sides, tolerance = dialog.options()
+        snapshot = self.history.document.frozen()
+        box = run_task(
+            self,
+            "Finding trim bounds…",
+            lambda cancel: editing.trim_bounds(
+                snapshot, based_on, sides, tolerance, cancelled=cancel.is_set
+            ),
+            cancellable=True,
+        )
+        if box is None:
+            return
+        editing.trim(self.history, based_on, sides, tolerance, box=box)
         self.canvas.fit()
 
     def mask_color(self, background):
@@ -1638,6 +2111,66 @@ class MainWindow(QMainWindow):
                     )
                     d.selection = Image.fromarray(result.astype(np.uint8) * 255)
 
+    def select_color_range(self):
+        from . import kernels
+
+        source = run_task(
+            self, "Sampling composite colors…", lambda: engine.render(self.history.document)
+        )
+        point = self.canvas.cursor_point or (source.width // 2, source.height // 2)
+        x, y = (
+            max(0, min(source.width - 1, int(point[0]))),
+            max(0, min(source.height - 1, int(point[1]))),
+        )
+        dialog = ColorRangeDialog(source.getpixel((x, y))[:3], self)
+        original = self.history.document.clone()
+
+        def preview(values):
+            try:
+                draft = original.clone()
+                draft.selection = kernels.color_range(source, **values)
+                self.preview_document = draft
+                self.canvas.invalidate()
+            except Exception as exc:
+                self.update_status(str(exc))
+
+        dialog.preview.connect(preview)
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                mask = run_task(
+                    self,
+                    "Selecting colors…",
+                    lambda: kernels.color_range(source, **dialog.result_settings()),
+                )
+                with self.history.edit("Color Range") as document:
+                    document.selection = mask
+        finally:
+            dialog.timer.stop()
+            dialog.deleteLater()
+            self.preview_document = None
+            self.canvas.invalidate()
+
+    def select_object(self):
+        path = models.default_path()
+        if not models.verified(path):
+            chosen, _ = QFileDialog.getOpenFileName(
+                self, "Choose a local U2NET object model", str(path.parent), "ONNX model (*.onnx)"
+            )
+            if not chosen:
+                return
+            path = Path(chosen)
+        source = run_task(
+            self, "Rendering object source…", lambda: engine.render(self.history.document)
+        )
+        try:
+            mask = run_task(
+                self, "Selecting object locally…", lambda: engine.subject_mask(source, path)
+            )
+        except ImportError as exc:
+            raise ValueError("Install the background extra for local object selection.") from exc
+        with self.history.edit("Object Selection") as document:
+            document.selection = mask.convert("L")
+
     def load_selection(self, mask):
         d = self.history.document
         layer = d.layer()
@@ -1699,6 +2232,18 @@ class MainWindow(QMainWindow):
         QApplication.clipboard().setImage(qimage(image))
         if cut:
             editing.fill_pixels(self.history, (0, 0, 0, 0), self.mask_target, True)
+
+    def copy_selected_layers(self):
+        self.layer_clipboard = editing.copy_layers(
+            self.history.document, self.selected or {self.history.document.active}
+        )
+
+    def paste_copied_layers(self):
+        if self.history is None or self.layer_clipboard is None:
+            raise ValueError("Copy layers before pasting them.")
+        self.selected = editing.paste_layers(self.history, self.layer_clipboard)
+        self.mask_target, self.mask_alone_id = False, None
+        self.refresh()
 
     def paste(self):
         image = QApplication.clipboard().image()

@@ -7,18 +7,22 @@ Wayland. Compose images, paint and retouch, edit text, work with masks and
 adjustment layers, and keep the editable project alongside your exports.
 
 This fork ports [Compositor](https://github.com/robbietilton/Compositor), created
-by **Robbie Tilton / Wonder Assembly LLC**. It reuses the original eight C pixel
+by **Robbie Tilton / Wonder Assembly LLC**. It reuses the shared C pixel
 kernels and preserves the macOS sources. The Linux interface, packaging, and
 editable text support are maintained in this fork. This is an independent port;
 it is not an official Omarchy or upstream Compositor release.
 
-**Early release:** the editor works on native Wayland, but exact Mac rendering
-and interaction parity are still being qualified. Rendering uses the CPU, and
-local background removal uses U2NETP rather than Apple Vision. See the
-[feature and parity audit](docs/linux-parity.md) for specific limits.
+**Upstream 1.4.5 integration:** the development branch supports project versions
+1–11, expanded adjustments, layer effects, dither, Camera Raw controls, PSD/PSB
+and secure SVG import, guides, and rich text. Rendering uses the CPU, and local
+background removal uses U2NETP rather than Apple Vision. Motion Blur and some
+other effects differ numerically from Mac output; this is not a pixel-identical
+Mac replacement. See the [feature and parity audit](docs/linux-parity.md) and
+[port map](docs/upstream-porting.md) for verified scope and accepted limitations.
 
 [Download the 0.1.1 preview](https://github.com/dlpwaters/compositor/releases/tag/linux-v0.1.1)
-or follow the source installer below. **Arch/Omarchy x86_64 is the tested target.**
+for the older tagged build, or install the current development branch below.
+**Arch/Omarchy x86_64 is the tested target.**
 The per-user installer is the recommended way to try this build.
 
 ![Compositor Linux editing a sample poster with text and color layers](docs/screenshots/editor.png)
@@ -51,7 +55,7 @@ update process before installing; the installer does not upgrade the system.
 Install `git` with your package manager if it is not already available, then:
 
 ```sh
-git clone --branch linux-v0.1.1 https://github.com/dlpwaters/compositor.git
+git clone --branch main https://github.com/dlpwaters/compositor.git
 cd compositor
 ./install.sh --install-system-deps
 ~/.local/bin/compositor-linux
@@ -182,8 +186,8 @@ COMPOSITOR_PYTHON=/usr/bin/python scripts/arch-package.sh --syncdeps
 `makepkg` resolves runtime dependencies with your configured package-manager
 authorization. Review the resulting package before installing it with pacman.
 The recipe lists its optional background-removal runtime separately. x86_64
-package creation has been exercised; a clean system package installation and
-aarch64 remain unqualified. There is no AUR package maintained by this fork.
+package creation and system installation have been exercised in Arch; aarch64
+Arch packaging remains unqualified. There is no AUR package maintained by this fork.
 Avoid installing both the per-user and system-package launchers at the same time.
 
 ## What you can make
@@ -199,8 +203,10 @@ Avoid installing both the per-user and system-package launchers at the same time
   marquee, lasso, wand, and selection refinement.
 - **Paint and retouch:** brush, eraser, healing, clone, blur, liquify/smudge,
   gradients, shapes, and eyedropper. Tools use scalable monochrome SVG icons.
-- **Adjust and export:** six editable adjustment types, filters, optional local
-  background removal, JPEG/PNG/HEIC/TIFF import, PNG/JPEG export, and clipboard.
+- **Adjust and export:** twelve editable adjustment types, six layer effects,
+  dither and Camera Raw controls, optional local background removal,
+  JPEG/PNG/HEIC/TIFF/PSD/PSB/SVG import, PNG/JPEG export, and clipboard.
+  Camera RAW decoding additionally requires the optional `rawpy` dependency.
 
 | Editable text | Solid-color layers |
 | --- | --- |
@@ -248,15 +254,18 @@ monitoring does not change the installed editor. See the
 ## Projects and compatibility
 
 `.comp` projects are directories containing a manifest and embedded PNG assets.
-Transfer the whole directory. The Linux editor reads versions 1–7 and writes
-version 7; imported photo paths are not needed to reopen a saved project.
+Transfer the whole directory. The current Linux editor reads versions 1–11 and
+writes version 11; imported photo paths are not needed to reopen a saved project.
+The older tagged 0.1.1 preview remains a versions 1–7 reader.
 
 Text is a Linux extension stored with a PNG fallback. Other readers can display
 the baked pixels; saving in the original Mac app can drop text editability.
 Pixel edits rasterize text, and Undo restores it. Reopening a project preserves
 its saved appearance even when the original font is unavailable; editing text
-requires that font or uses Qt's fallback. Real Mac round-trip validation remains
-pending. Details are in the [project format reference](docs/project-format.md).
+requires that font or uses Qt's fallback. A corpus of 68 Mac-generated projects
+has been checked for Linux loading, rendering, saving and identical Linux
+reopening. Not every flattened Mac PNG is pixel-identical on Linux. Details are
+in the [project format reference](docs/project-format.md) and [parity audit](docs/linux-parity.md).
 
 The current canvas-side limit is 30,000 pixels, with 100-megapixel raster budgets.
 Undo keeps up to 64 steps and approximately 512 MiB of unique raster assets.

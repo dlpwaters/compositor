@@ -16,10 +16,23 @@ final class PixelMove {
     let origin: DocumentSelection
     let duplicate: Bool
     var offset = CGSize.zero
+    /// The offset the raster's tiles were last rebuilt for. They're rebuilt only when something reads them — the Core
+    /// Graphics canvas, or the commit — as the GPU canvas draws the move from the lifted pixels as they are.
+    private var applied = CGSize.zero
+    func applyOffset() throws {
+        guard offset != applied else { return }
+        try raster.moveLifted(by: offset, duplicate: duplicate)
+        applied = offset
+    }
+    /// Whether the GPU canvas can draw this move: not a layer with a mask or effects, which the Core Graphics canvas draws.
+    var drawsOnGPU: Bool {
+        raster.layer.mask == nil && raster.layer.effects?.visible.isEmpty != false
+            && (duplicate ? raster.original : raster.holed) != nil
+    }
     var movedSelection: DocumentSelection {
         var shift = CGAffineTransform(translationX: offset.width, y: offset.height)
         guard let path = origin.path.copy(using: &shift) else { return origin }
-        return DocumentSelection(path: path, antialiased: origin.antialiased)
+        return DocumentSelection(path: path, antialiased: origin.antialiased, feather: origin.feather)
     }
     init(raster: BrushStroke, origin: DocumentSelection, duplicate: Bool = false) {
         self.raster = raster
@@ -40,6 +53,9 @@ extension EditorSession {
     func fillSelection(with source: FillSource) async {
         guard canEditPixels, let layer = activeLayer else { return }
         let value = paletteColor(background: source == .background)
+        // A text layer that is still text takes the color as its own, rather than being painted over: the letters
+        // change color and stay editable.
+        if !isMaskSelected, selection == nil, layer.liveText != nil, recolorText(layer.id, to: value) { return }
         let color = isMaskSelected
             ? CGColor(gray: value.red, alpha: 1)
             : CGColor(colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, components: [value.red, value.green, value.blue, 1])!
@@ -58,6 +74,7 @@ extension EditorSession {
     /// The Delete key: clears the selection when there is one; otherwise deletes the
     /// targeted mask, or the layer when its pixels are targeted.
     func deleteKeyPressed() {
+        if selectedEffect != nil { removeSelectedEffect(); return }
         if selection != nil { Task { await clearSelectedPixels() } }
         else { deleteLayerOrMask() }
     }
@@ -65,6 +82,7 @@ extension EditorSession {
     /// The trash button and Delete without a selection: with one layer's mask thumbnail targeted
     /// only the mask goes; otherwise every selected layer does, in one undo step.
     func deleteLayerOrMask() {
+        if selectedEffect != nil { removeSelectedEffect(); return }
         if isMaskSelected, activeLayer?.mask != nil, selectedLayerIDs.count <= 1 { deleteLayerMask() }
         else { deleteSelectedLayers() }
     }
@@ -76,7 +94,7 @@ extension EditorSession {
     /// first, and the Crop tool's rectangle doesn't block it.
     var canInvert: Bool {
         _ = showsBusy
-        guard document != nil, let layer = activeLayer, !isProjectBusy, !isImporting, brushStroke == nil, pixelMove == nil,
+        guard document != nil, textDraft == nil, let layer = activeLayer, !isProjectBusy, !isImporting, brushStroke == nil, pixelMove == nil,
               renamingLayerID == nil, !showsNewDocument, !showsImporter, selectedLayerIDs.count == 1, !layer.isGroup || isMaskSelected,
               document?.effectiveVisibleIDs.contains(layer.id) == true, selection?.isEmpty != true else { return false }
         return isMaskSelected ? layer.mask?.isEnabled == true : layer.asset != nil
@@ -122,7 +140,7 @@ extension EditorSession {
     }
 
     private static func expandedUniformMask(_ image: CGImage, width: Int, height: Int) throws -> CGImage {
-        guard width > 0, height > 0, width * height <= 100_000_000 else { throw ProjectError.tooLarge }
+        guard width > 0, height > 0, width * height <= DocumentLimits.maxSurfacePixels else { throw ProjectError.tooLarge }
         let context = try BrushRaster.context(width: width, height: height, mask: true)
         BrushRaster.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height), mask: true, context: context)
         guard let expanded = context.makeImage() else { throw ExportError.render }
@@ -149,9 +167,7 @@ extension EditorSession {
     /// selection stays put until commit; the outline is drawn from `displayedSelection`.
     func movePixels(by offset: CGSize) {
         guard let move = pixelMove else { return }
-        let rounded = CGSize(width: offset.width.rounded(), height: offset.height.rounded())
-        do { try move.raster.moveLifted(by: rounded, duplicate: move.duplicate) } catch { cancelPixelMove(); brushError = error.localizedDescription; return }
-        move.offset = rounded
+        move.offset = CGSize(width: offset.width.rounded(), height: offset.height.rounded())
         brushRevision += 1
     }
 
@@ -161,7 +177,7 @@ extension EditorSession {
         // While transforming selected pixels the outline follows the handles.
         if let edit = transformEdit, var matrix = floatingSelectionTransform(edit), let selection,
            let path = selection.path.copy(using: &matrix) {
-            return DocumentSelection(path: path, antialiased: selection.antialiased)
+            return DocumentSelection(path: path, antialiased: selection.antialiased, feather: selection.feather)
         }
         return selection
     }
@@ -172,8 +188,10 @@ extension EditorSession {
         guard let move = pixelMove, !isProjectBusy else { return }
         if move.offset != .zero {
             let moved = move.movedSelection
-            do { try await commitRasterEdit(move.raster, name: move.duplicate ? "Duplicate Pixels" : "Move Pixels") { self.document?.selection = moved } }
-            catch { brushError = error.localizedDescription }
+            do {
+                try move.applyOffset()
+                try await commitRasterEdit(move.raster, name: move.duplicate ? "Duplicate Pixels" : "Move Pixels") { self.document?.selection = moved }
+            } catch { brushError = error.localizedDescription }
         }
         pixelMove = nil
         brushRevision += 1
@@ -195,7 +213,8 @@ extension EditorSession {
     private func applyPixelEdit(to layer: ImageLayer, name: String, _ paint: (BrushStroke) throws -> Void) async {
         finishOpacityEdit()
         do {
-            let edit = try makeRasterEdit(for: layer)
+            // On a mask, a fill covers the whole canvas, past the mask's own area, as the brush can.
+            let edit = try makeRasterEdit(for: layer, growsMask: true)
             try paint(edit)
             guard !edit.patches.isEmpty else { return }
             try await commitRasterEdit(edit, name: name)

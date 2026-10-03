@@ -34,7 +34,7 @@ class WarpStroke:
                 self.pick_up(point)
             return
         distance = math.dist(point, self.last)
-        spacing = max(1, self.diameter * (0.08 if self.mode == "Smudge" else 0.025))
+        spacing = max(1, self.diameter * (0.005 if self.mode == "Smudge" else 0.025))
         if distance < spacing:
             return
         previous = self.last
@@ -88,11 +88,11 @@ class WarpStroke:
                 top - cy + radius : bottom - cy + radius, left - cx + radius : right - cx + radius
             ]
             under = self.pixels[top:bottom, left:right].astype(np.float32)
-            painted = under + (carried - under) * weight[..., None]
+            painted = under + (carried - under) * weight[..., None] * self.strength
             self.pixels[top:bottom, left:right] = np.clip(np.floor(painted + 0.5), 0, 255).astype(
                 np.uint8
             )
-            carried[:] = painted + (carried - painted) * self.strength
+            carried[:] = painted
         else:
             dx, dy = (
                 (point[0] - previous[0]) * self.strength,
@@ -111,7 +111,7 @@ class WarpStroke:
             ]
             moved = np.stack(
                 [
-                    map_coordinates(scratch[..., channel], coords, order=1, mode="nearest")
+                    map_coordinates(scratch[..., channel], coords, order=3, mode="nearest")
                     for channel in range(4)
                 ],
                 -1,
@@ -155,7 +155,7 @@ class WarpStroke:
         )
         mapping = editing.pixel_matrix(original.transform, size)
         source = kernels.straight(self.pixels).transform(
-            size, Image.Transform.AFFINE, tuple(mapping[:2].ravel()), Image.Resampling.BILINEAR
+            size, Image.Transform.AFFINE, tuple(mapping[:2].ravel()), Image.Resampling.BICUBIC
         )
         stroke = editing.Stroke(
             self.document, self.diameter + 4, 1, 1, mode="Replace", source=source

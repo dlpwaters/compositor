@@ -9,7 +9,16 @@ from PIL import Image, ImageChops, ImageOps
 from scipy.ndimage import map_coordinates
 
 from . import engine, kernels
-from .model import Document, Layer, TextContent, Transform, dimensions, new_id, validate_text
+from .model import (
+    Document,
+    Layer,
+    TextContent,
+    Transform,
+    dimensions,
+    linux_to_mac_text,
+    new_id,
+    validate_text,
+)
 
 HANDLES = ((0, 0), (0.5, 0), (1, 0), (1, 0.5), (1, 1), (0.5, 1), (0, 1), (0, 0.5))
 
@@ -157,6 +166,8 @@ def put_text(document, settings, image, position=None, layer_id=None):
         set_transform(layer, updated)
     layer.image = image
     layer.text = TextContent(deepcopy(settings), image)
+    if settings.get("macText") or "text" in layer.extras:
+        layer.extras["text"] = linux_to_mac_text(settings)
     return layer
 
 
@@ -176,6 +187,59 @@ def duplicate(history, selected):
                 result.append(copy)
         document.layers = result
         document.active = remap.get(document.active, next(iter(remap), document.active))
+    return set(remap.values())
+
+
+def copy_layers(document, selected):
+    """Copy selected subtrees and their clipping bases with owned raster data."""
+    ids = document.descendants(set(selected))
+    if not ids or any(document.layer(id) is None for id in ids):
+        raise ValueError("Select layers to copy.")
+    for _ in range(len(document.layers) + 1):
+        sources = {
+            layer.mask_source for layer in document.layers if layer.id in ids and layer.mask_source
+        }
+        expanded = document.descendants(ids | sources)
+        if expanded == ids:
+            break
+        ids = expanded
+    else:
+        raise ValueError("Invalid clipping dependency cycle.")
+    copies = []
+    for layer in document.layers:
+        if layer.id in ids:
+            cloned = layer.clone()
+            if cloned.image is not None:
+                cloned.image = cloned.image.copy()
+            if cloned.mask is not None:
+                cloned.mask = cloned.mask.copy()
+            if cloned.live_text is not None:
+                cloned.text.image = cloned.image
+            copies.append(cloned)
+    return copies
+
+
+def paste_layers(history, copied):
+    if not copied or len(copied) > 10_000:
+        raise ValueError("The layer clipboard is empty or too large.")
+    ids = {layer.id for layer in copied}
+    if len(ids) != len(copied):
+        raise ValueError("Duplicate clipboard layer IDs.")
+    remap = {id: new_id() for id in ids}
+    with history.edit("Paste Layers") as document:
+        for layer in copied:
+            clone = layer.clone()
+            clone.id = remap[layer.id]
+            clone.parent = remap.get(layer.parent)
+            clone.mask_source = remap.get(layer.mask_source)
+            if clone.image is not None:
+                clone.image = clone.image.copy()
+            if clone.mask is not None:
+                clone.mask = clone.mask.copy()
+            if clone.live_text is not None:
+                clone.text.image = clone.image
+            document.layers.append(clone)
+        document.active = remap[copied[-1].id]
     return set(remap.values())
 
 
@@ -243,6 +307,23 @@ def group_layers(history, selected):
             layer.parent = group.id
         document.active = group.id
     return group.id
+
+
+def ungroup(history, selected):
+    with history.edit("Ungroup") as document:
+        groups = [layer for layer in document.layers if layer.id in selected and layer.group]
+        if not groups:
+            raise ValueError("Select a folder to ungroup.")
+        for group in groups:
+            children = [child for child in document.layers if child.parent == group.id]
+            for child in children:
+                child.parent = group.parent
+            document.layers = [item for item in document.layers if item not in children]
+            index = document.layers.index(group)
+            document.layers[index : index + 1] = children
+        document.active = next(
+            (layer.id for layer in document.layers if layer.parent == groups[0].parent), None
+        )
 
 
 def move_layer(history, id, parent, before=None):
@@ -445,14 +526,16 @@ def resize_canvas(history, width, height, anchor=(0.5, 0.5)):
                     x=layer.mask_transform.x + dx,
                     y=layer.mask_transform.y + dy,
                 )
+        for guide in document.extras.get("guides", []):
+            guide["position"] += dx if guide["axis"] == "vertical" else dy
         document.width, document.height = width, height
         document.selection = None
 
 
-def crop(history, box):
+def crop(history, box, name="Crop"):
     x, y, width, height = map(round, box)
     dimensions(width, height)
-    with history.edit("Crop") as document:
+    with history.edit(name) as document:
         for layer in document.layers:
             layer.transform = replace(
                 layer.transform, x=layer.transform.x - x, y=layer.transform.y - y
@@ -463,8 +546,68 @@ def crop(history, box):
                     x=layer.mask_transform.x - x,
                     y=layer.mask_transform.y - y,
                 )
+        for guide in document.extras.get("guides", []):
+            guide["position"] -= x if guide["axis"] == "vertical" else y
         document.width, document.height = width, height
         document.selection = None
+
+
+def trim_bounds(
+    document,
+    based_on="Transparent Pixels",
+    sides=(True, True, True, True),
+    tolerance=0,
+    cancelled=None,
+):
+    """Find content bounds in rendered canvas strips, keeping temporary rasters finite."""
+    if based_on not in ("Transparent Pixels", "Top Left Pixel Color", "Bottom Right Pixel Color"):
+        raise ValueError("Invalid trim basis.")
+    if (
+        len(sides) != 4
+        or any(type(side) is not bool for side in sides)
+        or not any(sides)
+        or type(tolerance) is not int
+        or not 0 <= tolerance <= 255
+    ):
+        raise ValueError("Invalid trim options.")
+    width, height = document.width, document.height
+    target = None
+    if based_on != "Transparent Pixels":
+        x, y = (0, 0) if based_on == "Top Left Pixel Color" else (width - 1, height - 1)
+        target = np.asarray(engine.render(document, region=(x, y, 1, 1)), dtype=np.int16)[0, 0]
+    left, top, right, bottom = width, height, 0, 0
+    step = max(1, min(128, 1_000_000 // width))
+    for y in range(0, height, step):
+        if cancelled is not None and cancelled():
+            raise ValueError("Trim cancelled.")
+        image = engine.render(document, region=(0, y, width, min(step, height - y)))
+        pixels = np.asarray(image)
+        if target is None:
+            keep = pixels[:, :, 3] > 0
+        else:
+            keep = np.any(np.abs(pixels.astype(np.int16) - target) > tolerance, axis=2)
+        rows, columns = np.nonzero(keep)
+        if rows.size:
+            left = min(left, int(columns.min()))
+            top = min(top, y + int(rows.min()))
+            right = max(right, int(columns.max()) + 1)
+            bottom = max(bottom, y + int(rows.max()) + 1)
+    if right <= left or bottom <= top:
+        return None
+    trim_top, trim_bottom, trim_left, trim_right = sides
+    x0, y0 = (left if trim_left else 0), (top if trim_top else 0)
+    x1, y1 = (right if trim_right else width), (bottom if trim_bottom else height)
+    return x0, y0, x1 - x0, y1 - y0
+
+
+def trim(
+    history, based_on="Transparent Pixels", sides=(True, True, True, True), tolerance=0, box=None
+):
+    if box is None:
+        box = trim_bounds(history.document, based_on, sides, tolerance)
+    if box is None:
+        raise ValueError("No content remained after trimming.")
+    crop(history, box, name="Trim")
 
 
 def resize_image(history, width, height, resolution=None, resample=True):
@@ -500,6 +643,8 @@ def resize_image(history, width, height, resolution=None, resample=True):
                 layer.mask_transform = replace(
                     m, x=m.x * sx, y=m.y * sy, width=m.width * sx, height=m.height * sy
                 )
+        for guide in document.extras.get("guides", []):
+            guide["position"] *= sx if guide["axis"] == "vertical" else sy
         document.width, document.height = width, height
         document.selection = None
 
@@ -522,6 +667,11 @@ def flip_canvas(history, horizontal=True):
                             flip_y=t.flip_y if horizontal else not t.flip_y,
                         ),
                     )
+        for guide in document.extras.get("guides", []):
+            if (guide["axis"] == "vertical") == horizontal:
+                guide["position"] = (document.width if horizontal else document.height) - guide[
+                    "position"
+                ]
         if document.selection is not None:
             document.selection = (
                 ImageOps.mirror(document.selection)
@@ -908,11 +1058,13 @@ class Stroke:
         mask=False,
         mode="Paint",
         source=None,
+        blur_radius=10,
     ):
         self.document = document
         self.layer, self.original, self.transform = raster_target(document, mask)
         self.diameter, self.hardness, self.opacity = diameter, hardness, opacity
         self.color, self.mask, self.mode, self.source = color, mask, mode, source
+        self.blur_radius = blur_radius
         self.coverage = np.zeros((self.original.height, self.original.width), np.uint8)
         self.selection = (
             np.asarray(
@@ -945,7 +1097,7 @@ class Stroke:
             self.diameter / 2 * self.original.width / t.width,
             self.diameter / 2 * self.original.height / t.height,
         )
-        if not self.mask and (
+        if (
             x - rx < 0
             or y - ry < 0
             or x + rx > self.original.width
@@ -959,20 +1111,24 @@ class Stroke:
             size = right - left, bottom - top
             dimensions(*size, raster=True)
             old_size = self.original.size
-            original = Image.new("RGBA", size)
+            background = round(float(np.asarray(self.original)[0, :].mean())) if self.mask else 0
+            original = Image.new("L" if self.mask else "RGBA", size, background)
             original.paste(self.original, (-left, -top))
-            result = Image.new("RGBA", size)
+            result = Image.new("L" if self.mask else "RGBA", size, background)
             result.paste(self.result, (-left, -top))
             coverage = np.zeros(size[::-1], np.uint8)
             coverage[-top : -top + old_size[1], -left : -left + old_size[0]] = self.coverage
-            if self.source is not None:
+            if self.source is not None and not self.mask:
                 source = Image.new("RGBA", size)
                 source.paste(self.source, (-left, -top))
                 self.source = source
             if self.layer.mask is not None and self.layer.mask_transform is None:
                 self.layer.mask_transform = replace(t)
             self.transform = extended_transform(t, old_size, left, top, size)
-            self.layer.transform = self.transform
+            if self.mask:
+                self.layer.mask_transform = self.transform
+            else:
+                self.layer.transform = self.transform
             self.original, self.result, self.coverage = original, result, coverage
             self.selection = (
                 np.asarray(
@@ -1028,7 +1184,13 @@ class Stroke:
             self.result.paste(Image.alpha_composite(original, wash), (left, top))
             self.layer.image = self.result
         elif self.mode == "Blur":
-            padding = math.ceil(self.diameter / 4)
+            per_pixel = math.sqrt(
+                abs(t.width * t.height / (self.original.width * self.original.height))
+            )
+            sigma = min(
+                max(0.5, self.blur_radius) / max(1e-6, per_pixel), max(self.original.size) / 2
+            )
+            padding = math.ceil(sigma * 3)
             expanded = (
                 max(0, left - padding),
                 max(0, top - padding),
@@ -1038,7 +1200,7 @@ class Stroke:
             blurred = engine.filtered(
                 self.original.crop(expanded),
                 "Gaussian Blur",
-                {"radius": max(1, self.diameter / 12)},
+                {"radius": sigma},
             )
             cropped = blurred.crop(
                 (

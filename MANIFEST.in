@@ -5,7 +5,9 @@ recursive-include docs/media *.mp4 *.gif
 recursive-include docs/examples *.json *.png
 include linux/README.md
 recursive-include Compositor/Rendering *.c *.h
+
 recursive-include linux/tests *.py
+recursive-include linux/tests/fixtures *.md *.json *.png
 recursive-include packaging *.desktop PKGBUILD
 prune packaging/arch/src
 prune packaging/arch/pkg
@@ -13,6 +15,6 @@ include scripts/linux-build.sh scripts/linux-install.sh scripts/linux-desktop.py
 include scripts/linux-compare.py
 include install.sh scripts/linux-check.py scripts/linux-demo.py
 include scripts/linux-install-smoke.sh
-include docs/linux-parity.md docs/project-format.md docs/STATUS.md
+include docs/linux-parity.md docs/project-format.md docs/writing-comp-files.md docs/upstream-porting.md docs/STATUS.md
 include scripts/upstream-check.py
 include docs/upstream.json docs/upstream-maintenance.md docs/hermes-daily-prompt.md
