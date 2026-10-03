@@ -92,11 +92,11 @@ installation on a clean Arch system.
 
 ## Upstream maintenance
 
-The `maintenance/upstream-monitoring` branch adds a daily stable-release report,
-a single tracking issue updated only when its content changes, and weekly
-Linux CI to catch dependency drift. The baseline remains pinned to 1.0.4;
-no upstream feature or project-format update is implemented by this setup.
-Schedules activate when the workflow files are merged into the default branch.
+[PR #5](https://github.com/dlpwaters/compositor/pull/5) is merged into `main`.
+Both workflows are active: the stable-release report runs daily at 14:23 UTC,
+and Linux CI runs Mondays at 13:41 UTC to catch dependency drift. A single
+tracking issue updates only when report content changes. The baseline remains
+pinned to 1.0.4; this setup does not implement upstream features or newer formats.
 
 The initial live report resolves v1.4.5 to
 `086f1631573ccb2b57644e53b52bf1488fc976aa`, with 316 commits and 207 changed
@@ -113,6 +113,13 @@ watcher produced the initial report without changing the source checkout.
 The initial report is published in [issue #3](https://github.com/dlpwaters/compositor/issues/3).
 Its number is pinned to avoid discovery races in immediately repeated checks.
 
-Next maintenance step: review and merge the monitoring PR, then prioritize
-project formats 8–11 and changed C kernels in scoped update PRs. Native Wayland
-and real Mac/Linux round-trip qualification remain required for those changes.
+[Merged-main Linux CI](https://github.com/dlpwaters/compositor/actions/runs/37130635255)
+passes Python 3.12/3.14 and the fresh Arch installation job at `c7ee747`.
+The [initial watcher run](https://github.com/dlpwaters/compositor/actions/runs/37130633415)
+passes both report generation and the default-branch issue publisher; it reports
+the existing issue unchanged. The Hermes daily task can be created separately
+with the linked prompt.
+
+Next maintenance step: prioritize project formats 8–11 and changed C kernels
+in scoped update PRs. Native Wayland and real Mac/Linux round-trip qualification
+remain required for those changes.
