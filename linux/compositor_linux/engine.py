@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 
@@ -11,7 +12,7 @@ import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageOps
 from scipy.ndimage import gaussian_filter, map_coordinates, uniform_filter
 
-from . import kernels
+from . import dither, effects, kernels
 from .model import Document, dimensions
 
 
@@ -112,7 +113,7 @@ def _set_sat(c, sat):
     return (c - lo[..., None]) * (sat / np.maximum(hi - lo, 1e-12))[..., None]
 
 
-def blend(backdrop, source, mode="Normal", opacity=1):
+def blend(backdrop, source, mode="Normal", opacity: float = 1):
     if mode == "Normal" and opacity == 1:
         return Image.alpha_composite(backdrop, source)
     b, s = (
@@ -146,6 +147,61 @@ def blend(backdrop, source, mode="Normal", opacity=1):
             1,
             np.where(cs == 0, 0, 1 - np.minimum(1, (1 - cb) / np.maximum(cs, 1e-12))),
         )
+    elif mode == "Linear Burn":
+        value = np.maximum(0, cb + cs - 1)
+    elif mode == "Linear Dodge (Add)":
+        value = np.minimum(1, cb + cs)
+    elif mode == "Soft Light":
+        d = np.where(cb <= 0.25, ((16 * cb - 12) * cb + 4) * cb, np.sqrt(cb))
+        value = np.where(cs <= 0.5, cb - (1 - 2 * cs) * cb * (1 - cb), cb + (2 * cs - 1) * (d - cb))
+    elif mode == "Hard Light":
+        value = np.where(cs <= 0.5, 2 * cb * cs, 1 - 2 * (1 - cb) * (1 - cs))
+    elif mode == "Vivid Light":
+        value = np.where(
+            cs <= 0.5,
+            1 - np.minimum(1, (1 - cb) / np.maximum(2 * cs, 1e-12)),
+            np.minimum(1, cb / np.maximum(2 * (1 - cs), 1e-12)),
+        )
+        value = np.where((cs <= 0.5) & (cb >= 1), 1, value)
+        value = np.where((cs > 0.5) & (cb <= 0), 0, value)
+    elif mode == "Linear Light":
+        value = np.clip(cb + 2 * cs - 1, 0, 1)
+    elif mode == "Pin Light":
+        value = np.where(cs <= 0.5, np.minimum(cb, 2 * cs), np.maximum(cb, 2 * cs - 1))
+    elif mode == "Hard Mix":
+        # Mac draws premultiplied RGBA8 with a separately quantized global alpha.
+        # Keep both rounding stages: round(original premul) then multiply opacity.
+        # A direct Core Graphics sweep verifies this integer surface operation.
+        back = np.asarray(backdrop, dtype=np.int32)
+        front = np.asarray(source, dtype=np.int32)
+        factor = math.floor(opacity * 255 + 0.5)
+        backdrop_alpha = back[..., 3:4]
+        source_alpha = (front[..., 3:4] * factor + 127) // 255
+        backdrop_premul = (back[..., :3] * backdrop_alpha + 127) // 255
+        source_premul = (front[..., :3] * front[..., 3:4] + 127) // 255
+        source_premul = (source_premul * factor + 127) // 255
+        # Cross-multiplication preserves the strict equality boundary exactly.
+        value = (
+            source_premul * backdrop_alpha + backdrop_premul * source_alpha
+            > source_alpha * backdrop_alpha
+        )
+        source_fraction, backdrop_fraction = source_alpha / 255, backdrop_alpha / 255
+        alpha = np.floor(source_alpha + backdrop_alpha * (1 - source_fraction) + 0.5)
+        premul = np.floor(
+            source_premul * (1 - backdrop_fraction)
+            + backdrop_premul * (1 - source_fraction)
+            + value * source_fraction * backdrop_fraction * 255
+            + 0.5
+        )
+        # Core Image returns another premultiplied RGBA8 surface before PNG export.
+        rgb = premul * 255 / np.maximum(alpha, 1)
+        return byte_image(np.concatenate((rgb, alpha), axis=-1))
+    elif mode == "Exclusion":
+        value = cb + cs - 2 * cb * cs
+    elif mode == "Subtract":
+        value = np.maximum(0, cb - cs)
+    elif mode == "Divide":
+        value = np.minimum(1, cb / np.maximum(cs, 1e-12))
     elif mode == "Hue":
         value = _set_lum(_set_sat(cs, cb.max(-1) - cb.min(-1)), _lum(cb))
     elif mode == "Saturation":
@@ -203,6 +259,7 @@ def render(document: Document, region=None, scale=1, only=None):
                 target,
                 layer.shape,
                 layer.shape.get("cornerRadius", 0) * target[0] / layer.transform.width,
+                target[0] / layer.transform.width,
             )
         return place(source, layer.transform, size, (x, y), scale)
 
@@ -241,18 +298,79 @@ def render(document: Document, region=None, scale=1, only=None):
             stacks[base.id] = children
             stacked.update(child.id for child, _ in children)
 
-    def mask_for(layer, ancestors, live=True):
-        mask = raster_mask(layer)
+    def mask_for(layer, ancestors, live=True, own=True, defer_ancestor_opacity=False):
+        mask = raster_mask(layer) if own else Image.new("L", size, 255)
         for ancestor in ancestors:
             mask = ImageChops.multiply(mask, raster_mask(ancestor))
+            if ancestor.opacity != 1 and not defer_ancestor_opacity:
+                mask = mask.point(lambda n, amount=ancestor.opacity: round(n * amount))
         if live and layer.mask_source:
             mask = ImageChops.multiply(mask, coverage(layer.mask_source))
         return mask
 
     def own_image(layer, ancestors, live=True):
-        image = pixels(layer)
-        alpha = ImageChops.multiply(image.getchannel("A"), mask_for(layer, ancestors, live))
-        if layer.opacity != 1:
+        # Mac draws Hard Mix with a single effective child-and-folder opacity.
+        # Rounding folder alpha separately can flip a channel at the threshold.
+        hard_mix = layer.blend == "Hard Mix"
+        if layer.extras.get("effects"):
+            source = layer.image.copy()
+            if layer.shape:
+                source = shape_pixels(source.size, layer.shape)
+            if layer.mask is not None and layer.mask_enabled:
+                if layer.mask.size == (1, 1):
+                    local_mask = Image.new("L", source.size, layer.mask.getpixel((0, 0)))
+                elif layer.mask_transform is None:
+                    local_mask = layer.mask.resize(source.size, Image.Resampling.BILINEAR)
+                else:
+                    doc_mask = raster_mask(layer)
+                    t = layer.transform
+                    start = t.point(int(t.flip_x), int(t.flip_y))
+                    end_x = t.point(int(not t.flip_x), int(t.flip_y))
+                    end_y = t.point(int(t.flip_x), int(not t.flip_y))
+                    coefficients = (
+                        (end_x[0] - start[0]) * scale / source.width,
+                        (end_y[0] - start[0]) * scale / source.height,
+                        (start[0] - x) * scale,
+                        (end_x[1] - start[1]) * scale / source.width,
+                        (end_y[1] - start[1]) * scale / source.height,
+                        (start[1] - y) * scale,
+                    )
+                    local_mask = doc_mask.transform(
+                        source.size, Image.Transform.AFFINE, coefficients, Image.Resampling.BILINEAR
+                    )
+                source.putalpha(ImageChops.multiply(source.getchannel("A"), local_mask))
+            settings = layer.extras["effects"]
+            margin = 2
+            for key, item in settings.items():
+                if not item.get("enabled", True):
+                    continue
+                if key == "shadow":
+                    margin = max(
+                        margin, math.ceil(item.get("distance", 20) + item.get("blur", 20) * 3 + 2)
+                    )
+                elif key == "outerGlow":
+                    margin = max(margin, math.ceil(item.get("size", 20) * 3 + 2))
+                elif key == "stroke" and not item.get("inside", False):
+                    margin = max(margin, math.ceil(item.get("size", 4) + 2))
+            padded_size = source.width + 2 * margin, source.height + 2 * margin
+            dimensions(*padded_size, raster=True)
+            padded = Image.new("RGBA", padded_size)
+            padded.paste(source, (margin, margin))
+            rendered = effects.render(padded, settings)
+            center_x, center_y = layer.transform.center
+            expanded = replace(
+                layer.transform,
+                width=layer.transform.width * padded_size[0] / source.width,
+                height=layer.transform.height * padded_size[1] / source.height,
+            )
+            expanded.x, expanded.y = (center_x - expanded.width / 2, center_y - expanded.height / 2)
+            image = place(rendered, expanded, size, (x, y), scale)
+            mask = mask_for(layer, ancestors, live, own=False, defer_ancestor_opacity=hard_mix)
+        else:
+            image = pixels(layer)
+            mask = mask_for(layer, ancestors, live, defer_ancestor_opacity=hard_mix)
+        alpha = ImageChops.multiply(image.getchannel("A"), mask)
+        if layer.opacity != 1 and layer.blend != "Hard Mix":
             alpha = alpha.point(lambda n: round(n * layer.opacity))
         image.putalpha(alpha)
         return image
@@ -283,6 +401,9 @@ def render(document: Document, region=None, scale=1, only=None):
                         group,
                         own_image(child, child_ancestors, live=False),
                         child.blend,
+                        opacity=(child.opacity * math.prod(a.opacity for a in child_ancestors))
+                        if child.blend == "Hard Mix"
+                        else 1,
                     )
                 )
             group.putalpha(alpha)
@@ -291,7 +412,14 @@ def render(document: Document, region=None, scale=1, only=None):
             if layer.mask_source is None:
                 output = adjustment_surface(output, layer, ancestors)
         else:
-            output = blend(output, own_image(layer, ancestors), layer.blend)
+            output = blend(
+                output,
+                own_image(layer, ancestors),
+                layer.blend,
+                opacity=(layer.opacity * math.prod(a.opacity for a in ancestors))
+                if layer.blend == "Hard Mix"
+                else 1,
+            )
     return output
 
 
@@ -520,10 +648,125 @@ def adjust(image, adjustment, origin=(0, 0), units_per_pixel=1):
             *origin,
             units_per_pixel,
         )
+    if kind == "Invert":
+        return filtered(image, "Invert", {})
+    if kind == "Black & White":
+        settings = adjustment.get("blackWhiteSettings") or {}
+        weights = [
+            settings.get(key, default) / 100
+            for key, default in (
+                ("reds", 40),
+                ("yellows", 60),
+                ("greens", 40),
+                ("cyans", 60),
+                ("blues", 20),
+                ("magentas", 80),
+            )
+        ]
+        return kernels.mutate(
+            image,
+            "adjust_black_white",
+            weights,
+            int(settings.get("tint", False)),
+            settings.get("tintHue", 40),
+            settings.get("tintSaturation", 20) / 100,
+        )
+    if kind == "Color Balance":
+        settings = adjustment.get("colorBalanceSettings") or {}
+        channels = [
+            [
+                settings.get(band + axis, 0) / 100
+                for axis in ("CyanRed", "MagentaGreen", "YellowBlue")
+            ]
+            for band in ("shadow", "mid", "highlight")
+        ]
+        return kernels.mutate(
+            image, "adjust_color_balance", *channels, int(settings.get("preserveLuminosity", True))
+        )
+    if kind in ("Gaussian Blur", "Motion Blur"):
+        settings = (
+            {"radius": adjustment.get("blurRadius", 10)}
+            if kind == "Gaussian Blur"
+            else {
+                "angle": adjustment.get("motionAngle", 0),
+                "distance": adjustment.get("motionDistance", 10),
+            }
+        )
+        return filtered(image, kind, settings)
+    if kind == "Add Noise":
+        return kernels.mutate(
+            image,
+            "noise_add_at",
+            adjustment.get("noiseAmount", 10),
+            int(adjustment.get("noiseGaussian", False)),
+            int(adjustment.get("noiseMonochromatic", False)),
+            adjustment.get("noiseSeed", 0),
+            round(origin[0]),
+            round(origin[1]),
+        )
     raise ValueError(f"Unsupported adjustment: {kind}")
 
 
 def filtered(image, kind, settings):
+    if kind == "Camera Raw Filter":
+        from .camera_raw import apply as camera_raw_apply
+
+        return camera_raw_apply(image, settings)
+    if kind == "Dither":
+        return dither.apply(image, settings)
+    if kind == "Vignette":
+        color = settings.get("vignetteColor", [0, 0, 0])
+        color = [v / 255 if v > 1 else v for v in color]
+        return kernels.mutate(
+            image,
+            "adjust_colored_vignette",
+            0,
+            0,
+            image.width,
+            image.height,
+            0,
+            settings.get("vignetteAmount", 35),
+            settings.get("vignetteMidpoint", 50),
+            settings.get("vignetteRoundness", 100),
+            settings.get("vignetteFeather", 60),
+            settings.get("vignetteHighlights", 25),
+            *color,
+        )
+    if kind == "Tonal Contrast":
+        data = kernels.premultiply(image)
+        blurred = np.clip(
+            np.floor(
+                gaussian_filter(
+                    data.astype(np.float32),
+                    sigma=(settings.get("tonalRadius", 16), settings.get("tonalRadius", 16), 0),
+                    mode="nearest",
+                )
+                + 0.5
+            ),
+            0,
+            255,
+        ).astype(np.uint8)
+        return kernels.mutate(
+            image,
+            "adjust_tonal_contrast",
+            blurred,
+            settings.get("tonalAmount", 50),
+            settings.get("tonalShadows", 40),
+            settings.get("tonalMidtones", 60),
+            settings.get("tonalHighlights", 30),
+        )
+    if kind == "Bloom / Glow":
+        data = kernels.premultiply(image).astype(np.float32)
+        radius = settings.get("bloomRadius", 24)
+        blurred = gaussian_filter(data, sigma=(radius, radius, 0), mode="constant")
+        brightness = np.max(data[..., :3], axis=2, keepdims=True) / 255
+        halo = gaussian_filter(
+            data * np.clip((brightness - 0.5) * 2, 0, 1), sigma=(radius, radius, 0), mode="constant"
+        )
+        amount = settings.get("bloomAmount", 40) / 50
+        result = np.clip(data + halo * amount + blurred * amount * 0.1, 0, 255)
+        result[..., :3] = np.minimum(result[..., :3], result[..., 3:4])
+        return kernels.straight(np.floor(result + 0.5).astype(np.uint8))
     if kind in (
         "Hue/Saturation",
         "Levels",
@@ -531,6 +774,8 @@ def filtered(image, kind, settings):
         "Exposure",
         "Gradient Map",
         "Grain",
+        "Black & White",
+        "Color Balance",
     ):
         return adjust(image, dict(settings, kind=kind))
     if kind == "Invert":
@@ -561,9 +806,11 @@ def filtered(image, kind, settings):
         weights /= weights.sum()
         for offset, weight in zip(offsets, weights):
             coords = [yy + offset * math.sin(angle), xx - offset * math.cos(angle)]
+            # Core Image fades samples across the transparent image boundary.
             for channel in range(4):
                 result[..., channel] += (
-                    map_coordinates(data[..., channel], coords, order=1, mode="constant") * weight
+                    map_coordinates(data[..., channel], coords, order=1, mode="grid-constant")
+                    * weight
                 )
         return kernels.straight(np.clip(np.floor(result + 0.5), 0, 255).astype(np.uint8))
     if kind == "Add Noise":
@@ -580,12 +827,23 @@ def filtered(image, kind, settings):
     raise ValueError(f"Unknown filter: {kind}")
 
 
-def shape_pixels(size, style, radius=None):
+def shape_pixels(size, style, radius=None, line_scale=1):
     factor = 4 if max(size) < 2048 else 1
     coverage = Image.new("L", (size[0] * factor, size[1] * factor))
     draw = ImageDraw.Draw(coverage)
     bounds = (0, 0, coverage.width - 1, coverage.height - 1)
-    if style.get("kind") == "Ellipse":
+    if style.get("kind") == "Line":
+        width = max(1, round(style.get("lineWidth", 1) * line_scale * factor))
+        inset_x = min(coverage.width, width) / 2
+        inset_y = min(coverage.height, width) / 2
+        start = style.get("start", [inset_x / coverage.width, inset_y / coverage.height])
+        end = style.get("end", [1 - inset_x / coverage.width, 1 - inset_y / coverage.height])
+        p = (start[0] * coverage.width, start[1] * coverage.height)
+        q = (end[0] * coverage.width, end[1] * coverage.height)
+        draw.line((*p, *q), fill=255, width=width)
+        for cx, cy in (p, q):
+            draw.ellipse((cx - width / 2, cy - width / 2, cx + width / 2, cy + width / 2), fill=255)
+    elif style.get("kind") == "Ellipse":
         draw.ellipse(bounds, fill=255)
     else:
         draw.rounded_rectangle(

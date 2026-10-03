@@ -180,7 +180,7 @@ def test_reject_damaged_packages(tmp_path, attack):
     elif attack == "nan":
         record["opacity"] = float("nan")
     elif attack == "version":
-        m["version"] = 8
+        m["version"] = 12
     elif attack == "duplicate":
         m["layers"].append(record)
     elif attack == "non_mask":

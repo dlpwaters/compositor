@@ -1,7 +1,9 @@
 """Finite CPU jobs with a responsive native event loop."""
 
+from threading import Event
+
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
-from PySide6.QtWidgets import QDialog, QLabel, QProgressBar, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QLabel, QProgressBar, QPushButton, QVBoxLayout
 
 
 class Result(QObject):
@@ -23,16 +25,22 @@ class Job(QRunnable):
 
 
 class BusyDialog(QDialog):
+    def __init__(self, parent=None, cancel_event=None):
+        super().__init__(parent)
+        self.cancel_event = cancel_event
+
     def reject(self):
-        # A C kernel cannot safely be interrupted halfway through a raster write.
-        pass
+        # The worker checks between bounded strips; let it exit before closing.
+        if self.cancel_event is not None:
+            self.cancel_event.set()
 
     def closeEvent(self, event):
         event.ignore()
 
 
-def run_task(parent, label, function):
-    dialog = BusyDialog(parent)
+def run_task(parent, label, function, cancellable=False):
+    cancel_event = Event() if cancellable else None
+    dialog = BusyDialog(parent, cancel_event)
     dialog.setWindowTitle("Compositor")
     dialog.setWindowModality(Qt.WindowModality.WindowModal)
     layout = QVBoxLayout(dialog)
@@ -40,6 +48,10 @@ def run_task(parent, label, function):
     progress = QProgressBar()
     progress.setRange(0, 0)
     layout.addWidget(progress)
+    if cancellable:
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(dialog.reject)
+        layout.addWidget(cancel_button)
     dialog.setMinimumWidth(300)
     result, pool, response = Result(), QThreadPool(), []
     pool.setMaxThreadCount(1)
@@ -49,12 +61,14 @@ def run_task(parent, label, function):
         dialog.accept()
 
     result.ready.connect(finished, Qt.ConnectionType.QueuedConnection)
-    pool.start(Job(function, result))
+    pool.start(Job(lambda: function(cancel_event) if cancellable else function(), result))
     try:
         dialog.exec()
         pool.waitForDone()
     finally:
         dialog.deleteLater()
+    if cancel_event is not None and cancel_event.is_set():
+        return None
     if response[1] is not None:
         raise response[1]
     return response[0]

@@ -3,13 +3,16 @@
 ## Compositor
 
 This fork is based on [Robbie Tilton's Compositor](https://github.com/robbietilton/Compositor),
-baseline 1.0.4 (`a19db9011282399785dc18efcfded904627bdcc2`). Copyright (c) 2026
+baseline 1.4.5 (`11d8d7a50992b24fd9a760a1c13b1c01b70aaf30`). Copyright (c) 2026
 Wonder Assembly LLC. The complete upstream MIT notice is retained in [LICENSE](LICENSE).
-The macOS sources, eight portable C pixel kernels, and application artwork come
+The macOS sources, shared C pixel kernels, and application artwork come
 from that project. New Linux tool/action SVGs, screenshots, the demo footage and
 the synthetic editable sample were made for this fork and use its MIT license.
 The sample refers to the separately installed Liberation Sans font; font files
 are not redistributed in the sample or application packages.
+Both builds compile the shared upstream DitherPixels.c. A platform guard retains
+Apple's dispatch scheduling on macOS and selects serial plain-C rows on Linux;
+the pixel calculations are shared, not maintained as a separate copy.
 
 ## Installed dependencies
 
@@ -27,6 +30,7 @@ Use the license files for the actual installed versions when redistributing them
 | pillow-heif | [BSD-3-Clause](https://github.com/bigcat88/pillow_heif/blob/master/LICENSE.txt); libheif and its codecs have separate licenses |
 | libheif | [LGPL-3.0](https://github.com/strukturag/libheif/blob/master/COPYING) |
 | ONNX Runtime (optional) | [MIT and third-party notices](https://github.com/microsoft/onnxruntime/blob/main/LICENSE) |
+| rawpy / LibRaw (optional camera RAW decoder) | [rawpy MIT license](https://github.com/letmaik/rawpy/blob/main/LICENSE) and [LibRaw LGPL-2.1 or CDDL-1.0 terms](https://www.libraw.org/about) |
 
 The application uses Qt Core, Gui, Widgets, Svg, and Test for development checks.
 It neither modifies Qt/PySide6 nor prevents users from replacing those libraries.

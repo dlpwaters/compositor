@@ -1,9 +1,10 @@
-"""Validated v1–v7 .comp packages and atomic Linux package replacement."""
+"""Validated v1–v11 .comp packages and atomic Linux package replacement."""
 
 from __future__ import annotations
 
 import ctypes
 import errno
+import hashlib
 import io
 import json
 import os
@@ -23,6 +24,8 @@ from .model import (
     Transform,
     adjustment_record,
     dimensions,
+    linux_to_mac_text,
+    mac_to_linux_text,
 )
 
 FORMAT = "com.compositor.project"
@@ -43,6 +46,8 @@ LAYER_KEYS = {
     "maskPlacement",
     "maskLinked",
     "shape",
+    "text",
+    "effects",
     "linuxText",
 }
 DOC_KEYS = {
@@ -79,10 +84,32 @@ def checked_file(path, root, limit):
     path, root = Path(path), Path(root).resolve()
     if not path.resolve().is_relative_to(root):
         raise ValueError("Asset escapes the project package.")
+    if any(
+        parent.is_symlink()
+        for parent in (path, *path.parents)
+        if parent != root and parent.is_relative_to(root)
+    ):
+        raise ValueError("Project assets cannot be reached through symbolic links.")
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
         raise ValueError("Asset is not a regular file or exceeds the size limit.")
     return path
+
+
+def digest(path):
+    root = Path(path)
+    manifest_path = checked_file(root / "manifest.json", root, 4 * 1024 * 1024)
+    hasher = hashlib.sha256(manifest_path.read_bytes())
+    images = root / "images"
+    if images.exists():
+        if images.is_symlink() or not images.is_dir():
+            raise ValueError("Invalid project asset directory.")
+        for entry in sorted(images.iterdir()):
+            if not entry.is_file() or entry.is_symlink():
+                raise ValueError("Invalid project asset entry.")
+            hasher.update(entry.name.encode())
+            hasher.update(entry.stat().st_size.to_bytes(8, "little"))
+    return hasher.digest()
 
 
 def load(path):
@@ -96,8 +123,8 @@ def load(path):
             object_pairs_hook=unique_object,
             parse_constant=reject_constant,
         )
-        if m["format"] != FORMAT or type(m["version"]) is not int or not 1 <= m["version"] <= 7:
-            raise ValueError("Unsupported project format. Compositor supports versions 1–7.")
+        if m["format"] != FORMAT or type(m["version"]) is not int or not 1 <= m["version"] <= 11:
+            raise ValueError("Unsupported project format. Compositor supports versions 1–11.")
         if (
             m["colorSpace"] != "sRGB"
             or not isinstance(m["layers"], list)
@@ -136,6 +163,10 @@ def load(path):
                 shape=record.get("shape"),
                 extras={k: v for k, v in record.items() if k not in LAYER_KEYS},
             )
+            if record.get("text") is not None:
+                layer.extras["text"] = record["text"]
+            if record.get("effects") is not None:
+                layer.extras["effects"] = record["effects"]
             if type(layer.mask_enabled) is not bool or type(layer.mask_linked) is not bool:
                 raise ValueError("Invalid mask flags.")
             if record.get("maskPlacement") is not None:
@@ -150,6 +181,18 @@ def load(path):
                 and layer.mask_source is not None
                 or version < 7
                 and layer.adjustment is not None
+                or version < 8
+                and layer.group
+                and layer.opacity != 1
+                or version < 9
+                and layer.adjustment is not None
+                and layer.adjustment.get("kind") in ("Gaussian Blur", "Motion Blur", "Add Noise")
+                or version < 10
+                and isinstance(record.get("text"), dict)
+                and record["text"].get("colorRuns") is not None
+                or version < 11
+                and isinstance(record.get("text"), dict)
+                and record["text"].get("fontRuns") is not None
             ):
                 raise ValueError("Layer features exceed the declared format version.")
             for index, key in enumerate(("imageFile", "maskFile")):
@@ -186,8 +229,12 @@ def load(path):
                         layer.image = asset.convert("RGBA")
             if record.get("linuxText") is not None:
                 layer.text = TextContent(record["linuxText"], layer.image)
+            elif record.get("text") is not None:
+                layer.text = TextContent(mac_to_linux_text(record["text"]), layer.image)
             document.layers.append(layer)
         document.validate()
+        if m["version"] < 8 and m.get("guides"):
+            raise ValueError("Guides exceed the declared format version.")
         return document
     except (
         KeyError,
@@ -204,7 +251,7 @@ def manifest(document):
     m = dict(document.extras)
     m.update(
         format=FORMAT,
-        version=7,
+        version=11,
         colorSpace="sRGB",
         resolution=document.resolution,
         documentID=document.id,
@@ -216,6 +263,12 @@ def manifest(document):
         m["activeLayerID"] = document.active
     for layer in document.layers:
         r = dict(layer.extras)
+        if layer.text is not None and layer.live_text is None:
+            r.pop("text", None)
+        elif layer.live_text is not None and (
+            layer.live_text.settings.get("macText") or "text" in layer.extras
+        ):
+            r["text"] = linux_to_mac_text(layer.live_text.settings)
         r.update(
             id=layer.id,
             name=layer.name,
@@ -320,6 +373,10 @@ def save(document, path):
 
 
 def import_image(path):
+    if Path(path).suffix.lower() == ".svg":
+        from .svg import load as import_svg
+
+        return import_svg(path)
     from pillow_heif import register_heif_opener
 
     register_heif_opener()

@@ -1,0 +1,56 @@
+{
+  "activeLayerID" : "C6756F0F-4C9D-45D3-8D91-23530158EC10",
+  "colorSpace" : "sRGB",
+  "documentID" : "16707F7E-9289-4B44-B8CA-5A3F2B21D8BC",
+  "format" : "com.compositor.project",
+  "height" : 16,
+  "layers" : [
+    {
+      "blendMode" : "Normal",
+      "id" : "B54CE7D5-FCAA-44D9-A9BA-5FAF747F11F3",
+      "imageFile" : "B54CE7D5-FCAA-44D9-A9BA-5FAF747F11F3.png",
+      "isVisible" : true,
+      "name" : "Opaque backdrop",
+      "opacity" : 1,
+      "transform" : {
+        "flipX" : false,
+        "flipY" : false,
+        "origin" : [
+          0,
+          0
+        ],
+        "rotation" : 0,
+        "sampling" : "High quality",
+        "size" : [
+          16,
+          16
+        ]
+      }
+    },
+    {
+      "blendMode" : "Hard Mix",
+      "id" : "C6756F0F-4C9D-45D3-8D91-23530158EC10",
+      "imageFile" : "C6756F0F-4C9D-45D3-8D91-23530158EC10.png",
+      "isVisible" : true,
+      "name" : "Opaque foreground",
+      "opacity" : 1,
+      "transform" : {
+        "flipX" : false,
+        "flipY" : false,
+        "origin" : [
+          0,
+          0
+        ],
+        "rotation" : 0,
+        "sampling" : "High quality",
+        "size" : [
+          16,
+          16
+        ]
+      }
+    }
+  ],
+  "resolution" : 144,
+  "version" : 11,
+  "width" : 16
+}

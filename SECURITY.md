@@ -12,6 +12,13 @@ oversized data. Limits include a 4 MiB manifest, 10,000 layers, 30,000-pixel sid
 and separate 100-megapixel source/mask budgets. Text settings are typed and bounded;
 Qt receives plain text, so markup is not treated as image/resource instructions.
 These limits reduce exposure and do not make image decoders a sandbox.
+SVG import reads at most 4 MiB plus one rejection byte, rejects scripts, entities
+and linked resources, and refuses scenes deeper than 32 levels or over 10,000
+nodes before Qt rendering; its raster budget is 16 megapixels. PSD/PSB import
+accepts bounded 8-bit RGB raw/PackBits inputs, decodes at most four merged planes,
+and bounds/skips unused declared channels instead of retaining their decoded
+images. Camera RAW decoding is optional and local. PSD/RAW files are capped at
+1 GiB; these limits do not guarantee low memory use for every accepted image.
 
 Saving writes a sibling staging directory, fsyncs content, and atomically replaces
 an existing valid project. Failed validation or replacement keeps the old project.

@@ -1,0 +1,141 @@
+{
+  "activeLayerID" : "43E98BF5-5C3D-45C6-84D3-AF471995FF7B",
+  "colorSpace" : "sRGB",
+  "documentID" : "17542F66-5C48-4421-88B9-3B83AA87E5BE",
+  "format" : "com.compositor.project",
+  "height" : 16,
+  "layers" : [
+    {
+      "blendMode" : "Normal",
+      "id" : "CE9F2371-D72A-4B11-BA90-8FC873C4F097",
+      "imageFile" : "CE9F2371-D72A-4B11-BA90-8FC873C4F097.png",
+      "isVisible" : true,
+      "name" : "Backdrop",
+      "opacity" : 1,
+      "transform" : {
+        "flipX" : false,
+        "flipY" : false,
+        "origin" : [
+          0,
+          0
+        ],
+        "rotation" : 0,
+        "sampling" : "High quality",
+        "size" : [
+          16,
+          16
+        ]
+      }
+    },
+    {
+      "adjustment" : {
+        "colorize" : false,
+        "curves" : {
+          "channel" : "RGB",
+          "channels" : [
+            [
+              {
+                "x" : 0,
+                "y" : 0
+              },
+              {
+                "x" : 255,
+                "y" : 255
+              }
+            ],
+            [
+              {
+                "x" : 0,
+                "y" : 0
+              },
+              {
+                "x" : 255,
+                "y" : 255
+              }
+            ],
+            [
+              {
+                "x" : 0,
+                "y" : 0
+              },
+              {
+                "x" : 255,
+                "y" : 255
+              }
+            ],
+            [
+              {
+                "x" : 0,
+                "y" : 0
+              },
+              {
+                "x" : 255,
+                "y" : 255
+              }
+            ]
+          ]
+        },
+        "hue" : 0,
+        "kind" : "Motion Blur",
+        "levels" : {
+          "channel" : "RGB",
+          "ranges" : [
+            {
+              "black" : 0,
+              "gamma" : 1,
+              "outputBlack" : 0,
+              "outputWhite" : 255,
+              "white" : 255
+            },
+            {
+              "black" : 0,
+              "gamma" : 1,
+              "outputBlack" : 0,
+              "outputWhite" : 255,
+              "white" : 255
+            },
+            {
+              "black" : 0,
+              "gamma" : 1,
+              "outputBlack" : 0,
+              "outputWhite" : 255,
+              "white" : 255
+            },
+            {
+              "black" : 0,
+              "gamma" : 1,
+              "outputBlack" : 0,
+              "outputWhite" : 255,
+              "white" : 255
+            }
+          ]
+        },
+        "lightness" : 0,
+        "motionAngle" : 27,
+        "motionDistance" : 7,
+        "noiseSeed" : 12345,
+        "saturation" : 0
+      },
+      "id" : "43E98BF5-5C3D-45C6-84D3-AF471995FF7B",
+      "isVisible" : true,
+      "name" : "Motion Blur",
+      "transform" : {
+        "flipX" : false,
+        "flipY" : false,
+        "origin" : [
+          0,
+          0
+        ],
+        "rotation" : 0,
+        "sampling" : "High quality",
+        "size" : [
+          16,
+          16
+        ]
+      }
+    }
+  ],
+  "resolution" : 144,
+  "version" : 11,
+  "width" : 16
+}

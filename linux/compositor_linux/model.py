@@ -16,14 +16,25 @@ MAX_SIDE = 30_000
 MAX_PIXELS = 100_000_000
 BLENDS = (
     "Normal",
-    "Multiply",
-    "Screen",
-    "Overlay",
     "Darken",
-    "Lighten",
-    "Difference",
-    "Color Dodge",
+    "Multiply",
     "Color Burn",
+    "Linear Burn",
+    "Lighten",
+    "Screen",
+    "Color Dodge",
+    "Linear Dodge (Add)",
+    "Overlay",
+    "Soft Light",
+    "Hard Light",
+    "Vivid Light",
+    "Linear Light",
+    "Pin Light",
+    "Hard Mix",
+    "Difference",
+    "Exclusion",
+    "Subtract",
+    "Divide",
     "Hue",
     "Saturation",
     "Color",
@@ -36,6 +47,12 @@ ADJUSTMENTS = (
     "Exposure",
     "Gradient Map",
     "Grain",
+    "Invert",
+    "Black & White",
+    "Color Balance",
+    "Gaussian Blur",
+    "Motion Blur",
+    "Add Noise",
 )
 
 
@@ -196,7 +213,7 @@ def validate_text(settings):
         or settings.get("version") != 1
         or not isinstance(settings.get("text"), str)
         or not settings["text"].strip()
-        or len(settings["text"]) > 32_768
+        or len(settings["text"]) > (100_000 if settings.get("macText") else 32_768)
         or not isinstance(settings.get("family"), str)
         or not settings["family"].strip()
         or len(settings["family"]) > 256
@@ -209,6 +226,140 @@ def validate_text(settings):
         or any(type(value) is not int or not 0 <= value <= 255 for value in settings["color"])
     ):
         raise ValueError("Invalid editable text settings.")
+
+
+def validate_upstream_text(value):
+    try:
+        code_units = len(value["content"].encode("utf-16-le")) // 2
+    except (TypeError, KeyError, UnicodeEncodeError, AttributeError) as exc:
+        raise ValueError("Invalid upstream text metadata.") from exc
+    if (
+        not isinstance(value, dict)
+        or not isinstance(value.get("content"), str)
+        or code_units > 100_000
+        or not isinstance(value.get("fontName"), str)
+        or not value["fontName"]
+        or value.get("alignment", "Left") not in ("Left", "Center", "Right")
+        or not finite(value.get("fontSize", 72), 1, 2000)
+        or not finite(value.get("tracking", 0), -100, 1000)
+        or not finite(value.get("leading", 0), 0, 5000)
+        or any(not finite(value.get(k, 0), 0, 1) for k in ("red", "green", "blue"))
+    ):
+        raise ValueError("Invalid upstream text metadata.")
+    box = value.get("boxSize")
+    if box is not None and (
+        not isinstance(box, list)
+        or len(box) != 2
+        or any(not finite(n, 16, 300_000) for n in box)
+        or box[0] * box[1] > MAX_PIXELS
+    ):
+        raise ValueError("Invalid text box.")
+    length = len(value["content"].encode("utf-16-le")) // 2
+    for field_name in ("colorRuns", "fontRuns"):
+        runs = value.get(field_name)
+        if runs is None:
+            continue
+        if not isinstance(runs, list) or not 0 < len(runs) <= length:
+            raise ValueError("Invalid text runs.")
+        end = 0
+        for run in runs:
+            if not isinstance(run, dict):
+                raise ValueError("Invalid text run.")
+            start, span = run.get("location"), run.get("length")
+            if type(start) is not int or type(span) is not int or start < end or span < 1:
+                raise ValueError("Invalid text run extent.")
+            end = start + span
+            if end > length:
+                raise ValueError("Text run exceeds content.")
+            if field_name == "colorRuns":
+                if any(not finite(run.get(k), 0, 1) for k in ("red", "green", "blue")):
+                    raise ValueError("Invalid text run color.")
+            elif (
+                not isinstance(run.get("fontName"), str)
+                or not run["fontName"]
+                or len(run["fontName"]) > 200
+                or "\n" in run["fontName"]
+            ):
+                raise ValueError("Invalid text run font.")
+
+
+def mac_to_linux_text(value):
+    validate_upstream_text(value)
+    return dict(
+        version=1,
+        text=value["content"],
+        family=value["fontName"],
+        size=max(1, min(2048, round(value.get("fontSize", 72)))),
+        bold=False,
+        italic=False,
+        underline=False,
+        alignment=value.get("alignment", "Left"),
+        color=[round(value.get(key, 0) * 255) for key in ("red", "green", "blue")],
+        macText=deepcopy(value),
+    )
+
+
+def linux_to_mac_text(settings):
+    value = deepcopy(settings.get("macText") or {})
+    value.update(
+        content=settings["text"],
+        fontName=settings["family"],
+        fontSize=settings["size"],
+        alignment=settings["alignment"],
+        red=settings["color"][0] / 255,
+        green=settings["color"][1] / 255,
+        blue=settings["color"][2] / 255,
+        tracking=value.get("tracking", 0),
+        leading=value.get("leading", 0),
+    )
+    if value["content"] != (settings.get("macText") or {}).get("content", value["content"]):
+        value.pop("colorRuns", None)
+        value.pop("fontRuns", None)
+    validate_upstream_text(value)
+    return value
+
+
+def validate_effects(value):
+    if not isinstance(value, dict) or any(
+        key not in ("stroke", "shadow", "colorOverlay", "innerShadow", "outerGlow", "innerGlow")
+        for key in value
+    ):
+        raise ValueError("Invalid layer effects.")
+    for kind, effect in value.items():
+        if not isinstance(effect, dict) or type(effect.get("enabled", True)) is not bool:
+            raise ValueError("Invalid effect visibility.")
+        if any(not finite(effect.get(channel, 0), 0, 1) for channel in ("red", "green", "blue")):
+            raise ValueError("Invalid effect color.")
+        default = 0.5 if kind in ("shadow", "innerShadow") else 1
+        if not finite(effect.get("opacity", default), 0, 1):
+            raise ValueError("Invalid effect opacity.")
+        if kind in ("stroke", "outerGlow", "innerGlow"):
+            if not finite(effect.get("size", 4 if kind == "stroke" else 20), 0, 500):
+                raise ValueError("Invalid effect size.")
+        if kind in ("shadow", "innerShadow") and (
+            not finite(effect.get("angle", 90), -360, 360)
+            or not finite(effect.get("distance", 20), 0, 5000)
+            or not finite(effect.get("blur", 20), 0, 500)
+        ):
+            raise ValueError("Invalid effect shadow.")
+        if kind == "stroke" and type(effect.get("inside", False)) is not bool:
+            raise ValueError("Invalid stroke side.")
+
+
+def validate_guides(guides):
+    if not isinstance(guides, list) or len(guides) > 1000:
+        raise ValueError("Invalid guide count.")
+    seen = set()
+    for guide in guides:
+        if not isinstance(guide, dict) or guide.get("axis") not in ("horizontal", "vertical"):
+            raise ValueError("Invalid guide axis.")
+        try:
+            id = str(uuid.UUID(guide["id"]))
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise ValueError("Invalid guide ID.") from exc
+        if id in seen or not finite(guide.get("position"), -1_000_000, 1_000_000):
+            raise ValueError("Invalid guide position or duplicate ID.")
+        seen.add(id)
 
 
 @dataclass
@@ -277,6 +428,21 @@ class Document:
             extras=deepcopy(self.extras),
         )
 
+    def frozen(self):
+        """Own every raster so a background save cannot observe later edits."""
+        snapshot = self.clone()
+        for layer in snapshot.layers:
+            was_text = layer.live_text is not None
+            if layer.image is not None:
+                layer.image = layer.image.copy()
+            if layer.mask is not None:
+                layer.mask = layer.mask.copy()
+            if was_text:
+                layer.text.image = layer.image
+        if snapshot.selection is not None:
+            snapshot.selection = snapshot.selection.copy()
+        return snapshot
+
     def layer(self, id=None):
         return next((layer for layer in self.layers if layer.id == (id or self.active)), None)
 
@@ -306,6 +472,8 @@ class Document:
 
     def validate(self):
         dimensions(self.width, self.height)
+        if "guides" in self.extras:
+            validate_guides(self.extras["guides"])
         if not finite(self.resolution, 1, 9600) or len(self.layers) > 10_000:
             raise ValueError("Invalid resolution or layer count.")
         uuid.UUID(self.id)
@@ -328,10 +496,7 @@ class Document:
             ):
                 raise ValueError("Invalid layer metadata.")
             if layer.group and (
-                layer.image is not None
-                or layer.adjustment is not None
-                or layer.opacity != 1
-                or layer.blend != "Normal"
+                layer.image is not None or layer.adjustment is not None or layer.blend != "Normal"
             ):
                 raise ValueError("Folders must be pass-through and cannot contain raster pixels.")
             if layer.adjustment:
@@ -341,7 +506,7 @@ class Document:
             if layer.shape:
                 if (
                     not isinstance(layer.shape, dict)
-                    or layer.shape.get("kind") not in ("Rectangle", "Ellipse")
+                    or layer.shape.get("kind") not in ("Rectangle", "Ellipse", "Line")
                     or any(not finite(layer.shape.get(k), 0, 1) for k in ("red", "green", "blue"))
                     or not finite(layer.shape.get("cornerRadius"), 0, 300_000)
                     or layer.image is None
@@ -349,6 +514,31 @@ class Document:
                     or layer.adjustment
                 ):
                     raise ValueError("Invalid live shape metadata.")
+                if layer.shape["kind"] == "Line" and (
+                    not finite(layer.shape.get("lineWidth"), 0, 5000)
+                    or any(
+                        layer.shape.get(key) is not None
+                        and (
+                            not isinstance(layer.shape.get(key), list)
+                            or len(layer.shape[key]) != 2
+                            or any(not finite(value, 0, 1) for value in layer.shape[key])
+                        )
+                        for key in ("start", "end")
+                    )
+                ):
+                    raise ValueError("Invalid live line metadata.")
+            if "text" in layer.extras:
+                if layer.image is None or layer.group or layer.adjustment or layer.shape:
+                    raise ValueError("Invalid upstream text layer.")
+                validate_upstream_text(layer.extras["text"])
+                if layer.live_text is not None and (
+                    layer.extras["text"]["content"] != layer.live_text.settings["text"]
+                ):
+                    raise ValueError("Editable text metadata is inconsistent.")
+            if "effects" in layer.extras:
+                if layer.image is None or layer.group:
+                    raise ValueError("Invalid effects layer.")
+                validate_effects(layer.extras["effects"])
             if layer.text is not None:
                 if (
                     not isinstance(layer.text, TextContent)
@@ -462,6 +652,42 @@ def validate_adjustment(a):
         for key, lo, hi, default in specifications:
             if not finite(settings.get(key, default), lo, hi):
                 raise ValueError("Invalid adjustment settings.")
+    black_white = a.get("blackWhiteSettings") or {}
+    for key, default in (
+        ("reds", 40),
+        ("yellows", 60),
+        ("greens", 40),
+        ("cyans", 60),
+        ("blues", 20),
+        ("magentas", 80),
+    ):
+        if not finite(black_white.get(key, default), -200, 300):
+            raise ValueError("Invalid Black & White weight.")
+    if (
+        type(black_white.get("tint", False)) is not bool
+        or not finite(black_white.get("tintHue", 40), 0, 360)
+        or not finite(black_white.get("tintSaturation", 20), 0, 100)
+    ):
+        raise ValueError("Invalid Black & White tint.")
+    balance = a.get("colorBalanceSettings") or {}
+    for band in ("shadow", "mid", "highlight"):
+        for axis in ("CyanRed", "MagentaGreen", "YellowBlue"):
+            if not finite(balance.get(band + axis, 0), -100, 100):
+                raise ValueError("Invalid Color Balance setting.")
+    if type(balance.get("preserveLuminosity", True)) is not bool:
+        raise ValueError("Invalid Color Balance setting.")
+    for key, lo, hi, default in (
+        ("blurRadius", 0.1, 250, 10),
+        ("motionAngle", -90, 90, 0),
+        ("motionDistance", 1, 2000, 10),
+        ("noiseAmount", 0.1, 400, 10),
+    ):
+        if not finite(a.get(key, default), lo, hi):
+            raise ValueError("Invalid spatial adjustment setting.")
+    if any(type(a.get(key, False)) is not bool for key in ("noiseGaussian", "noiseMonochromatic")):
+        raise ValueError("Invalid noise mode.")
+    if type(a.get("noiseSeed", 0)) is not int or not 0 <= a.get("noiseSeed", 0) <= 0xFFFFFFFF:
+        raise ValueError("Invalid noise seed.")
     gradient = a.get("gradientMapSettings") or {}
     for name, default in (("shadows", 0), ("highlights", 1)):
         if any(
@@ -563,6 +789,7 @@ class History:
             for layer in self.document.layers:
                 if isinstance(layer.text, TextContent) and layer.live_text is None:
                     layer.text = None
+                    layer.extras.pop("text", None)
             self.document.validate()
         except BaseException:
             self.document = before

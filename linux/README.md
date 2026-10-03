@@ -1,10 +1,11 @@
 # Compositor Linux: Arch and Omarchy guide
 
 Native Qt/Wayland image editing alongside the original macOS app, based on
-upstream `a19db901` (Compositor 1.0.4). The Linux editor provides layers, folders,
+upstream `11d8d7a` (Compositor 1.4.5). The Linux editor provides layers, folders,
 masks, clipping, nondestructive transforms, selections, painting, retouching,
-six editable adjustment types, filters, project tabs, and image import/export.
-It builds the original eight C pixel kernels without changing their source.
+twelve editable adjustment types, layer effects, Camera Raw, dither, guides,
+rich text, project tabs, PSD/PSB/SVG import and image export.
+It builds the shared C pixel kernels; Dither has a guarded plain-C Linux path.
 
 This is a working Linux port with an explicit [parity audit](../docs/linux-parity.md).
 Exact macOS pixel equivalence and Apple Vision equivalence are not certified.
@@ -116,7 +117,7 @@ Every operation is also available through menus; no global bindings are installe
 
 ## Project compatibility and limits
 
-Reads format versions 1–7 and writes version 7. Embedded assets, masks, shapes,
+Reads format versions 1–11 and writes version 11. Embedded assets, masks, shapes,
 adjustments, hierarchy and clipping references round-trip independently of
 original photo paths. See [project format](../docs/project-format.md).
 Unknown optional manifest/layer fields are retained. PNG and JPEG exports use
@@ -126,8 +127,10 @@ a selectable transparency background.
 Editable text is a Linux extension with optional `linuxText` metadata and an
 ordinary PNG fallback. The original Mac app can display the baked pixels but
 can discard edit settings when saving. Reopening retains the saved appearance
-without the font; editing uses the installed font or Qt fallback. Real Mac
-round-trip qualification is still pending.
+without the font; editing uses the installed font or Qt fallback. A 68-project
+Mac-generated corpus loads, renders, saves and reopens identically on Linux.
+Mac PNG output is not universally byte-identical; Motion Blur and smaller
+numerical differences are documented in the parity audit.
 
 Canvas/source sides are limited to 30,000 pixels. Source and mask asset budgets
 are each 100 megapixels. Flattened operations also require a raster within

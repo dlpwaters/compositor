@@ -9,6 +9,7 @@ from PySide6.QtGui import (
     QFont,
     QImage,
     QPainter,
+    QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
     QTextDocument,
@@ -19,16 +20,23 @@ from .model import dimensions, validate_text
 
 def render_text(settings):
     validate_text(settings)
+    mac = settings.get("macText") or {}
     font = QFont(settings["family"])
     font.setPixelSize(settings["size"])
     font.setBold(settings["bold"])
     font.setItalic(settings["italic"])
     font.setUnderline(settings["underline"])
+    if mac.get("tracking"):
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, mac["tracking"])
     document = QTextDocument()
     document.setDefaultFont(font)
-    document.setDocumentMargin(max(2, math.ceil(settings["size"] / 3)))
+    document.setDocumentMargin(12 if mac else max(2, math.ceil(settings["size"] / 3)))
     option = document.defaultTextOption()
-    option.setWrapMode(option.WrapMode.NoWrap)
+    option.setWrapMode(
+        option.WrapMode.WrapAtWordBoundaryOrAnywhere
+        if mac.get("boxSize")
+        else option.WrapMode.NoWrap
+    )
     option.setAlignment(
         {
             "Left": Qt.AlignmentFlag.AlignLeft,
@@ -38,12 +46,32 @@ def render_text(settings):
     )
     document.setDefaultTextOption(option)
     document.setPlainText(settings["text"])
-    document.setTextWidth(-1)
+    if mac.get("boxSize"):
+        document.setTextWidth(mac["boxSize"][0])
+    else:
+        document.setTextWidth(-1)
     cursor = QTextCursor(document)
     cursor.select(QTextCursor.SelectionType.Document)
     color = QTextCharFormat()
     color.setForeground(QColor(*settings["color"]))
     cursor.mergeCharFormat(color)
+    if mac.get("leading"):
+        cursor.select(QTextCursor.SelectionType.Document)
+        block = QTextBlockFormat()
+        block.setLineHeight(mac["leading"], QTextBlockFormat.LineHeightTypes.FixedHeight)
+        cursor.mergeBlockFormat(block)
+    for run in mac.get("fontRuns") or []:
+        cursor.setPosition(run["location"])
+        cursor.setPosition(run["location"] + run["length"], QTextCursor.MoveMode.KeepAnchor)
+        style = QTextCharFormat()
+        style.setFontFamily(run["fontName"])
+        cursor.mergeCharFormat(style)
+    for run in mac.get("colorRuns") or []:
+        cursor.setPosition(run["location"])
+        cursor.setPosition(run["location"] + run["length"], QTextCursor.MoveMode.KeepAnchor)
+        style = QTextCharFormat()
+        style.setForeground(QColor(*(round(run[key] * 255) for key in ("red", "green", "blue"))))
+        cursor.mergeCharFormat(style)
     size = document.size()
     width, height = max(1, math.ceil(size.width())), max(1, math.ceil(size.height()))
     dimensions(width, height, raster=True)
