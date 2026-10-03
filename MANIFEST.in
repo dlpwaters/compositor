@@ -14,3 +14,5 @@ include scripts/linux-compare.py
 include install.sh scripts/linux-check.py scripts/linux-demo.py
 include scripts/linux-install-smoke.sh
 include docs/linux-parity.md docs/project-format.md docs/STATUS.md
+include scripts/upstream-check.py
+include docs/upstream.json docs/upstream-maintenance.md docs/hermes-daily-prompt.md

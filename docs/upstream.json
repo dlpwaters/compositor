@@ -1,0 +1,9 @@
+{
+  "repository": "robbietilton/Compositor",
+  "baseline_tag": "v1.0.4",
+  "baseline_commit": "a19db9011282399785dc18efcfded904627bdcc2",
+  "tracking_issue": {
+    "repository": "dlpwaters/compositor",
+    "number": 3
+  }
+}
